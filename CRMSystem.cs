@@ -21,11 +21,14 @@ public interface IOrder {
     DateTime CreatedAt { get; }
 }
 
+// Product & Order Implementation
 public class Product : IProduct {
     public string Id { get; set; }
     public string Name { get; set; }
     public decimal Price { get; set; }
     public string Category { get; set; }
+
+    public override string ToString() => $"{Name} (${Price})";
 }
 
 public class Order : IOrder {
@@ -33,12 +36,123 @@ public class Order : IOrder {
     public List<(string ProductId, int Quantity)> Products { get; set; } = new();
     public string Status { get; set; } = "pending";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public override string ToString() => $"Order {Id}, Status: {Status}";
 }
 
+// Inventory Item
 public class InventoryItem {
     public Product Product { get; set; }
     public int Quantity { get; set; }
+
+    public override string ToString() => $"{Product.Name} - Qty: {Quantity}";
 }
+
+// Generic Repository
+public class Repository<T> where T : class {
+    private readonly List<T> _items = new();
+
+    public void Add(T item) {
+        if (item == null) throw new ArgumentNullException(nameof(item));
+        _items.Add(item);
+    }
+
+    public IEnumerable<T> GetAll() => _items.ToList();
+
+    public T Find(Func<T, bool> predicate) {
+        if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+        return _items.FirstOrDefault(predicate);
+    }
+
+    public void Remove(Func<T, bool> predicate) {
+        if (predicate == null) throw new ArgumentNullException(nameof(predicate));
+        var item = _items.FirstOrDefault(predicate);
+        if (item != null) _items.Remove(item);
+    }
+
+    public int Count => _items.Count;
+}
+
+// Inventory Service
+public class InventoryService {
+    private readonly Repository<Product> _productRepo = new();
+    private readonly Repository<Order> _orderRepo = new();
+    private readonly List<InventoryItem> _inventory = new();
+
+    public void AddProduct(Product product) {
+        if (string.IsNullOrWhiteSpace(product?.Id) || product.Price <= 0) {
+            throw new ArgumentException("Invalid product data", nameof(product));
+        }
+        if (_productRepo.Find(p => p.Id == product.Id) != null) {
+            throw new InvalidOperationException("Product already exists");
+        }
+        _productRepo.Add(product);
+    }
+
+    public bool AddStock(string productId, int quantity) {
+        if (string.IsNullOrEmpty(productId) || quantity <= 0) return false;
+
+        var product = _productRepo.Find(p => p.Id == productId);
+        if (product == null) return false;
+
+        var item = _inventory.FirstOrDefault(i => i.Product.Id == productId);
+        if (item != null) {
+            item.Quantity += quantity;
+        } else {
+            _inventory.Add(new InventoryItem { Product = product, Quantity = quantity });
+        }
+
+        return true;
+    }
+
+    public bool RemoveStock(string productId, int quantity) {
+        if (string.IsNullOrEmpty(productId) || quantity <= 0) return false;
+
+        var item = _inventory.FirstOrDefault(i => i.Product.Id == productId);
+        if (item == null || item.Quantity < quantity) return false;
+
+        item.Quantity -= quantity;
+        if (item.Quantity == 0) {
+            _inventory.RemoveAll(i => i.Product.Id == productId);
+        }
+
+        return true;
+    }
+
+    public Order CreateOrder(List<(string ProductId, int Quantity)> productList) {
+        if (productList == null || productList.Count == 0)
+            throw new ArgumentException("Empty product list");
+
+        foreach (var (productId, qty) in productList) {
+            var item = _inventory.FirstOrDefault(i => i.Product.Id == productId);
+            if (item == null || item.Quantity < qty) {
+                throw new InvalidOperationException($"Insufficient stock for product: {productId}");
+            }
+        }
+
+        var order = new Order {
+            Id = $"ORD-{DateTime.UtcNow.Ticks}",
+            Products = productList,
+            CreatedAt = DateTime.UtcNow,
+            Status = "processing"
+        };
+
+        foreach (var (productId, qty) in productList) {
+            RemoveStock(productId, qty);
+        }
+
+        order.Status = "completed";
+        _orderRepo.Add(order);
+        return order;
+    }
+
+    public IEnumerable<Product> GetAllProducts() => _productRepo.GetAll();
+
+    public IEnumerable<InventoryItem> GetInventoryStatus() => _inventory.ToList();
+
+    public IEnumerable<Order> GetAllOrders() => _orderRepo.GetAll();
+}
+
 
 // Generic Repository
 public class Repository<T> where T : class {
