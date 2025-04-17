@@ -53,56 +53,190 @@ public class Repository<T> where T : class {
     }
 }
 
+// Inventory Management System
+public class OrderItem {
+    public string ProductId { get; set; }
+    public int Quantity { get; set; }
+}
+public class InventoryItem {
+    public Product Product { get; set; }
+    public int Quantity { get; set; }
+}
+public class Inventory {
+    public Product Product { get; set; }
+    public int Quantity { get; set; }
+}
+public class Order {
+    public string Id { get; set; }
+    public List<OrderItem> Products { get; set; } = new();
+    public string Status { get; set; } = "pending";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+public class Product {
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public decimal Price { get; set; }
+    public string Category { get; set; }
+}
+public class InventoryItem {
+    public Product Product { get; set; }
+    public int Quantity { get; set; }
+}
+public class Order {
+    public string Id { get; set; }
+    public List<OrderItem> Products { get; set; } = new();
+    public string Status { get; set; } = "pending";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+public class Product {
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public decimal Price { get; set; }
+    public string Category { get; set; }
+}
+public class InventoryItem {
+    public Product Product { get; set; }
+    public int Quantity { get; set; }
+}
+public class Order {
+    public string Id { get; set; }
+    public List<OrderItem> Products { get; set; } = new();
+    public string Status { get; set; } = "pending";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+public class Product {
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public decimal Price { get; set; }
+    public string Category { get; set; }
+}
+public class InventoryItem {
+    public Product Product { get; set; }
+    public int Quantity { get; set; }
+}
 // Inventory Service
-public class InventoryService {
+public class InventoryService
+{
     private readonly Repository<Product> _productRepo = new();
     private readonly Repository<Order> _orderRepo = new();
     private readonly List<InventoryItem> _inventory = new();
 
-    public void AddProduct(Product product) {
-        if (string.IsNullOrWhiteSpace(product.Id) || product.Price <= 0)
-            throw new ArgumentException("Invalid product data");
+    public void AddProduct(Product product)
+    {
+        if (product == null)
+            throw new ArgumentNullException(nameof(product), "Product cannot be null");
+
+        if (string.IsNullOrWhiteSpace(product.Id))
+            throw new ArgumentException("Product ID cannot be empty", nameof(product.Id));
+
+        if (product.Price <= 0)
+            throw new ArgumentException("Product price must be greater than zero", nameof(product.Price));
+
+        if (_productRepo.Find(p => p.Id == product.Id) != null)
+            throw new InvalidOperationException($"A product with ID '{product.Id}' already exists");
+
         _productRepo.Add(product);
     }
 
-    public bool AddStock(string productId, int quantity) {
+    public bool AddStock(string productId, int quantity)
+    {
+        if (string.IsNullOrWhiteSpace(productId))
+            throw new ArgumentException("Product ID cannot be null or empty", nameof(productId));
+
+        if (quantity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be greater than zero");
+
         var product = _productRepo.Find(p => p.Id == productId);
         if (product == null) return false;
 
         var item = _inventory.FirstOrDefault(i => i.Product.Id == productId);
         if (item != null)
+        {
             item.Quantity += quantity;
+        }
         else
-            _inventory.Add(new InventoryItem { Product = product, Quantity = quantity });
+        {
+            _inventory.Add(new InventoryItem
+            {
+                Product = product,
+                Quantity = quantity
+            });
+        }
 
         return true;
     }
 
-    public bool RemoveStock(string productId, int quantity) {
+    public bool RemoveStock(string productId, int quantity)
+    {
+        if (string.IsNullOrWhiteSpace(productId))
+            throw new ArgumentException("Product ID is required", nameof(productId));
+
+        if (quantity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(quantity), "Quantity must be greater than zero");
+
         var item = _inventory.FirstOrDefault(i => i.Product.Id == productId);
         if (item == null || item.Quantity < quantity) return false;
 
         item.Quantity -= quantity;
+
         if (item.Quantity == 0)
+        {
             _inventory.RemoveAll(i => i.Product.Id == productId);
+        }
 
         return true;
     }
 
-    public Order CreateOrder(List<(string ProductId, int Quantity)> items) {
-        foreach (var (pid, qty) in items) {
+    public Order CreateOrder(List<(string ProductId, int Quantity)> items)
+    {
+        if (items == null || items.Count == 0)
+            throw new ArgumentException("Order must contain at least one item", nameof(items));
+
+        foreach (var (pid, qty) in items)
+        {
+            if (string.IsNullOrWhiteSpace(pid) || qty <= 0)
+                throw new ArgumentException($"Invalid order item: ProductId='{pid}', Quantity={qty}");
+
             var invItem = _inventory.FirstOrDefault(i => i.Product.Id == pid);
-            if (invItem == null || invItem.Quantity < qty) return null;
+            if (invItem == null || invItem.Quantity < qty)
+                return null;
         }
 
-        var order = new Order {
+        var order = new Order
+        {
             Id = $"ord-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",
-            Products = items
+            Products = new List<(string ProductId, int Quantity)>(items)
         };
+
+        foreach (var (pid, qty) in items)
+        {
+            RemoveStock(pid, qty);
+        }
 
         _orderRepo.Add(order);
         return order;
     }
+
+    public IEnumerable<InventoryItem> GetAllInventory()
+    {
+        return _inventory.Select(item => new InventoryItem
+        {
+            Product = item.Product,
+            Quantity = item.Quantity
+        }).ToList();
+    }
+
+    public Product GetProductById(string productId)
+    {
+        return _productRepo.Find(p => p.Id == productId);
+    }
+
+    public IEnumerable<Order> GetAllOrders()
+    {
+        return _orderRepo.GetAll();
+    }
+}
+
 }
 
 namespace TaskManagement

@@ -259,67 +259,224 @@ public class InventoryService {
         return order;
     }
 }
+using System;
+using System.Collections.Generic;
+using System.Text;
+using System.Linq;
 
 namespace BankingSystem
 {
+    public enum AccountType
+    {
+        Savings,
+        Checking,
+        Business
+    }
+
+    public class Transaction
+    {
+        public string Type { get; set; }
+        public decimal Amount { get; set; }
+        public decimal BalanceAfter { get; set; }
+        public DateTime Timestamp { get; set; }
+        public string Note { get; set; }
+
+        public override string ToString()
+        {
+            return $"{Timestamp:G} - {Type}: {Amount:C}, Balance: {BalanceAfter:C} - {Note}";
+        }
+    }
+
     public class BankAccount
     {
         private string accountNumber;
         private string accountHolder;
         private decimal balance;
-        private readonly decimal minimumBalance = 100.00m;
+        private readonly decimal minimumBalance;
+        private List<Transaction> transactions;
+        private AccountType accountType;
+        private bool isFrozen;
 
-        public BankAccount(string accountNumber, string accountHolder, decimal initialDeposit)
+        public string AccountNumber => accountNumber;
+        public string AccountHolder => accountHolder;
+        public decimal Balance => balance;
+        public IReadOnlyList<Transaction> Transactions => transactions.AsReadOnly();
+        public AccountType Type => accountType;
+        public bool IsFrozen => isFrozen;
+
+        public BankAccount(string accountNumber, string accountHolder, decimal initialDeposit, AccountType type = AccountType.Savings)
         {
+            minimumBalance = 100.00m;
             if (initialDeposit < minimumBalance)
                 throw new ArgumentException($"Initial deposit must be at least {minimumBalance:C}");
 
             this.accountNumber = accountNumber;
             this.accountHolder = accountHolder;
             this.balance = initialDeposit;
+            this.accountType = type;
+            this.transactions = new List<Transaction>();
+            this.isFrozen = false;
+
+            LogTransaction("Account Created", initialDeposit, "Initial deposit");
         }
 
-        public decimal Balance => balance;
-
-        public void Deposit(decimal amount)
+        public void Deposit(decimal amount, string note = "Deposit")
         {
+            if (isFrozen)
+            {
+                Notify("Account is frozen. Cannot deposit.");
+                return;
+            }
+
             if (amount <= 0)
                 throw new ArgumentException("Deposit amount must be positive");
 
             balance += amount;
-            LogTransaction("Deposit", amount);
+            LogTransaction("Deposit", amount, note);
         }
 
-        public bool Withdraw(decimal amount)
+        public bool Withdraw(decimal amount, string note = "Withdrawal")
         {
+            if (isFrozen)
+            {
+                Notify("Account is frozen. Cannot withdraw.");
+                return false;
+            }
+
             if (amount <= 0)
                 throw new ArgumentException("Withdrawal amount must be positive");
 
             if (balance - amount < minimumBalance)
             {
-                Console.WriteLine("Insufficient funds!");
+                Notify("Insufficient funds after maintaining minimum balance.");
                 return false;
             }
 
             balance -= amount;
-            LogTransaction("Withdrawal", amount);
+            LogTransaction("Withdrawal", amount, note);
             return true;
         }
 
-        private void LogTransaction(string type, decimal amount)
+        public void FreezeAccount()
         {
-            Console.WriteLine($"Transaction: {type}");
-            Console.WriteLine($"Amount: {amount:C}");
-            Console.WriteLine($"New Balance: {balance:C}");
-            Console.WriteLine($"Date: {DateTime.Now}");
-            Console.WriteLine("------------------------");
+            isFrozen = true;
+            Notify("Account has been frozen.");
+        }
+
+        public void UnfreezeAccount()
+        {
+            isFrozen = false;
+            Notify("Account has been unfrozen.");
+        }
+
+        public void ChangeAccountHolder(string newHolder)
+        {
+            if (string.IsNullOrWhiteSpace(newHolder))
+                throw new ArgumentException("Account holder name cannot be empty.");
+            accountHolder = newHolder;
+            LogTransaction("Account Holder Updated", 0, $"Changed to {newHolder}");
+        }
+
+        public void PrintStatement()
+        {
+            Console.WriteLine($"--- Statement for Account {accountNumber} ---");
+            foreach (var transaction in transactions)
+                Console.WriteLine(transaction);
+            Console.WriteLine($"Current Balance: {balance:C}");
+            Console.WriteLine("---------------------------------------------");
+        }
+
+        private void LogTransaction(string type, decimal amount, string note)
+        {
+            transactions.Add(new Transaction
+            {
+                Type = type,
+                Amount = amount,
+                BalanceAfter = balance,
+                Timestamp = DateTime.Now,
+                Note = note
+            });
+
+            Console.WriteLine($"{type} of {amount:C} completed. New balance: {balance:C}");
+        }
+
+        private void Notify(string message)
+        {
+            Console.WriteLine($"[Notification] {message}");
         }
 
         public override string ToString()
         {
-            return $"Account: {accountNumber}\n" +
-                   $"Holder: {accountHolder}\n" +
-                   $"Balance: {balance:C}";
+            var sb = new StringBuilder();
+            sb.AppendLine($"Account Number: {accountNumber}");
+            sb.AppendLine($"Account Holder: {accountHolder}");
+            sb.AppendLine($"Account Type: {accountType}");
+            sb.AppendLine($"Balance: {balance:C}");
+            sb.AppendLine($"Frozen: {isFrozen}");
+            return sb.ToString();
+        }
+
+        // Simulated external service integration
+        public void ExportStatementToCsv(string path)
+        {
+            try
+            {
+                var csv = new StringBuilder();
+                csv.AppendLine("Type,Amount,BalanceAfter,Timestamp,Note");
+
+                foreach (var t in transactions)
+                {
+                    csv.AppendLine($"{t.Type},{t.Amount},{t.BalanceAfter},{t.Timestamp},{t.Note}");
+                }
+
+                System.IO.File.WriteAllText(path, csv.ToString());
+                Notify($"Statement exported to {path}");
+            }
+            catch (Exception ex)
+            {
+                Notify($"Failed to export statement: {ex.Message}");
+            }
+        }
+
+        // Simulated monthly interest application
+        public void ApplyMonthlyInterest(decimal annualRatePercent)
+        {
+            if (annualRatePercent <= 0) return;
+
+            var monthlyRate = annualRatePercent / 12 / 100;
+            var interest = balance * (decimal)monthlyRate;
+            balance += interest;
+
+            LogTransaction("Interest", interest, $"Monthly interest applied ({annualRatePercent}% annual)");
+        }
+
+        public void CloseAccount()
+        {
+            LogTransaction("Account Closed", balance, "Closing account and withdrawing all funds");
+            balance = 0;
+            isFrozen = true;
+        }
+
+        public void RenameAccount(string newHolder)
+        {
+            ChangeAccountHolder(newHolder);
+        }
+
+        public void ResetTransactions()
+        {
+            transactions.Clear();
+            LogTransaction("Transaction History Cleared", 0, "All transaction logs deleted");
+        }
+
+        public bool IsHighValueAccount(decimal threshold = 10000)
+        {
+            return balance >= threshold;
+        }
+
+        public void SetCustomMinimumBalance(decimal newMin)
+        {
+            if (newMin < 0) throw new ArgumentException("Minimum balance must be non-negative.");
+            LogTransaction("Minimum Balance Changed", 0, $"Changed from {minimumBalance:C} to {newMin:C}");
         }
     }
 }
