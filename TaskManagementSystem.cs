@@ -493,20 +493,366 @@ namespace TicTacToe
         }
     }
 
-    public class Program
+    // Display the history of played games
+private void DisplayGameHistory()
+{
+    Console.WriteLine("\n--- Game History ---");
+
+    if (gameHistory.Count == 0)
     {
-        public static void Main()
+        Console.WriteLine("No games played yet.");
+    }
+    else
+    {
+        Console.WriteLine($"Total games played: {gameHistory.Count}");
+
+        // Loop through each recorded game
+        for (int i = 0; i < gameHistory.Count; i++)
         {
-            Console.WriteLine("=== TIC-TAC-TOE ===");
-            Console.Write("Play against AI? (y/n): ");
-            bool singlePlayer = Console.ReadLine()?.Trim().ToLower() == "y";
+            string result = gameHistory[i];
+            Console.WriteLine($"Game {i + 1}: {result}");
 
-            Game game = new Game(singlePlayer);
-            game.Start();
+            // Additional feedback based on result
+            if (result.Contains("Win"))
+            {
+                Console.WriteLine("  Result: Victory detected.");
+            }
+            else if (result.Contains("Draw"))
+            {
+                Console.WriteLine("  Result: It was a draw. Close one!");
+            }
+            else
+            {
+                Console.WriteLine("  Result: Unclear - format mismatch.");
+            }
 
-            Console.WriteLine("Thanks for playing!");
+            Console.WriteLine(); // Spacer
+        }
+
+        // Summary at the end
+        int winCount = gameHistory.Count(g => g.Contains("Win"));
+        int drawCount = gameHistory.Count(g => g.Contains("Draw"));
+        int otherCount = gameHistory.Count - winCount - drawCount;
+
+        Console.WriteLine("Summary of game results:");
+        Console.WriteLine($"  Wins : {winCount}");
+        Console.WriteLine($"  Draws: {drawCount}");
+        Console.WriteLine($"  Others: {otherCount}");
+    }
+
+    Console.WriteLine("----------------------\n");
+}
+
+// Handle human player's move
+private void HandleHumanMove(Player player)
+{
+    bool validMove = false;
+    Console.WriteLine($"\n{player.Name}'s Turn ({player.Symbol})");
+
+    while (!validMove)
+    {
+        Console.Write("Enter row (1-3): ");
+        string rowInput = Console.ReadLine()?.Trim();
+
+        if (string.IsNullOrEmpty(rowInput))
+        {
+            Console.WriteLine("Row input cannot be empty.");
+            continue;
+        }
+
+        if (!int.TryParse(rowInput, out int row))
+        {
+            Console.WriteLine("Row must be a numeric value.");
+            continue;
+        }
+
+        if (row < 1 || row > 3)
+        {
+            Console.WriteLine("Row must be between 1 and 3.");
+            continue;
+        }
+
+        Console.Write("Enter column (1-3): ");
+        string colInput = Console.ReadLine()?.Trim();
+
+        if (string.IsNullOrEmpty(colInput))
+        {
+            Console.WriteLine("Column input cannot be empty.");
+            continue;
+        }
+
+        if (!int.TryParse(colInput, out int col))
+        {
+            Console.WriteLine("Column must be a numeric value.");
+            continue;
+        }
+
+        if (col < 1 || col > 3)
+        {
+            Console.WriteLine("Column must be between 1 and 3.");
+            continue;
+        }
+
+        Console.WriteLine($"Attempting move at row {row}, column {col}...");
+
+        validMove = board.MakeMove(row - 1, col - 1, player.Symbol);
+        if (!validMove)
+        {
+            Console.WriteLine("Invalid move. Cell is already occupied or out of bounds.");
+        }
+        else
+        {
+            Console.WriteLine("Move successful.");
+        }
+
+        Console.WriteLine(); // Add spacing
+    }
+
+    Console.WriteLine("End of turn.\n");
+}
+
+// Handle AI move logic
+private void HandleAIMove(Player player)
+{
+    Console.WriteLine("\nAI is making a move...");
+    Thread.Sleep(1000); // Delay for effect
+
+    (int row, int col) = FindBestMove(player.Symbol);
+
+    if (row == -1 || col == -1)
+    {
+        Console.WriteLine("AI could not find a smart move. Picking randomly.");
+        Random rand = new Random();
+        int attempts = 0;
+
+        do
+        {
+            row = rand.Next(0, Board.Size);
+            col = rand.Next(0, Board.Size);
+            attempts++;
+        }
+        while (!board.IsCellEmpty(row, col) && attempts < 100);
+
+        if (attempts >= 100)
+        {
+            Console.WriteLine("AI failed to find any valid cell after 100 tries.");
+            return;
         }
     }
+
+    board.MakeMove(row, col, player.Symbol);
+    Console.WriteLine($"AI placed {player.Symbol} at row {row + 1}, column {col + 1}");
+    Console.WriteLine("AI turn complete.\n");
+}
+
+// AI decision logic
+private (int, int) FindBestMove(PlayerSymbol symbol)
+{
+    Console.WriteLine("Evaluating best move...");
+
+    // Step 1: Try to win
+    for (int i = 0; i < Board.Size; i++)
+    {
+        for (int j = 0; j < Board.Size; j++)
+        {
+            if (board.IsCellEmpty(i, j))
+            {
+                board.MakeMove(i, j, symbol);
+
+                if (board.CheckWin(symbol))
+                {
+                    board.MakeMove(i, j, PlayerSymbol.None);
+                    Console.WriteLine($"Winning move found at {i},{j}");
+                    return (i, j);
+                }
+
+                board.MakeMove(i, j, PlayerSymbol.None);
+            }
+        }
+    }
+
+    // Step 2: Block opponent's win
+    PlayerSymbol opponent = symbol == PlayerSymbol.X ? PlayerSymbol.O : PlayerSymbol.X;
+
+    for (int i = 0; i < Board.Size; i++)
+    {
+        for (int j = 0; j < Board.Size; j++)
+        {
+            if (board.IsCellEmpty(i, j))
+            {
+                board.MakeMove(i, j, opponent);
+
+                if (board.CheckWin(opponent))
+                {
+                    board.MakeMove(i, j, PlayerSymbol.None);
+                    Console.WriteLine($"Blocking opponent at {i},{j}");
+                    return (i, j);
+                }
+
+                board.MakeMove(i, j, PlayerSymbol.None);
+            }
+        }
+    }
+
+    // Step 3: Take center
+    if (board.IsCellEmpty(1, 1))
+    {
+        Console.WriteLine("Taking center cell.");
+        return (1, 1);
+    }
+
+    // Step 4: Take a corner
+    int[] corners = new int[] { 0, 2 };
+
+    foreach (int i in corners)
+    {
+        foreach (int j in corners)
+        {
+            if (board.IsCellEmpty(i, j))
+            {
+                Console.WriteLine($"Taking corner at {i},{j}");
+                return (i, j);
+            }
+        }
+    }
+
+    // Step 5: Fallback
+    Console.WriteLine("No strategic move found.");
+    return (-1, -1);
+}
+
+// Add these classes after the existing code
+
+public class GameAnalytics
+{
+    private readonly List<GameRecord> gameRecords;
+    private readonly Dictionary<PlayerSymbol, PlayerStats> playerStats;
+
+    public GameAnalytics()
+    {
+        gameRecords = new List<GameRecord>();
+        playerStats = new Dictionary<PlayerSymbol, PlayerStats>
+        {
+            { PlayerSymbol.X, new PlayerStats() },
+            { PlayerSymbol.O, new PlayerStats() }
+        };
+    }
+
+    public void RecordGame(GameRecord record)
+    {
+        gameRecords.Add(record);
+        UpdatePlayerStats(record);
+    }
+
+    public void DisplayDetailedStats()
+    {
+        Console.WriteLine("\n=== Detailed Game Statistics ===");
+        
+        foreach (var player in playerStats)
+        {
+            Console.WriteLine($"\nPlayer {player.Key} Statistics:");
+            Console.WriteLine($"Total Games: {player.Value.TotalGames}");
+            Console.WriteLine($"Wins: {player.Value.Wins} ({CalculatePercentage(player.Value.Wins, player.Value.TotalGames)}%)");
+            Console.WriteLine($"Losses: {player.Value.Losses} ({CalculatePercentage(player.Value.Losses, player.Value.TotalGames)}%)");
+            Console.WriteLine($"Draws: {player.Value.Draws} ({CalculatePercentage(player.Value.Draws, player.Value.TotalGames)}%)");
+            Console.WriteLine($"Average Moves Per Game: {player.Value.AverageMovesPerGame:F1}");
+            Console.WriteLine($"Center Cell Usage: {CalculatePercentage(player.Value.CenterMoves, player.Value.TotalMoves)}%");
+            Console.WriteLine($"Corner Cell Usage: {CalculatePercentage(player.Value.CornerMoves, player.Value.TotalMoves)}%");
+        }
+
+        DisplayWinningPatterns();
+    }
+
+    private void UpdatePlayerStats(GameRecord record)
+    {
+        var stats = playerStats[record.Winner ?? PlayerSymbol.None];
+        stats.TotalGames++;
+
+        if (record.Winner.HasValue)
+            stats.Wins++;
+        else
+            stats.Draws++;
+
+        foreach (var move in record.Moves)
+        {
+            var playerStats = playerStats[move.Player];
+            playerStats.TotalMoves++;
+
+            if (IsCenter(move.Row, move.Column))
+                playerStats.CenterMoves++;
+            else if (IsCorner(move.Row, move.Column))
+                playerStats.CornerMoves++;
+        }
+    }
+
+    private bool IsCenter(int row, int column)
+    {
+        return row == 1 && column == 1;
+    }
+
+    private bool IsCorner(int row, int column)
+    {
+        return (row == 0 || row == 2) && (column == 0 || column == 2);
+    }
+
+    private decimal CalculatePercentage(int part, int total)
+    {
+        return total == 0 ? 0 : (decimal)part / total * 100;
+    }
+
+    private void DisplayWinningPatterns()
+    {
+        var winningGames = gameRecords.Where(r => r.Winner.HasValue);
+        
+        Console.WriteLine("\nWinning Move Patterns:");
+        foreach (var game in winningGames)
+        {
+            Console.WriteLine($"\nGame ID: {game.GameId}");
+            Console.WriteLine($"Winner: Player {game.Winner}");
+            Console.WriteLine("Moves:");
+            foreach (var move in game.Moves)
+            {
+                Console.WriteLine($"- Player {move.Player}: ({move.Row + 1},{move.Column + 1})");
+            }
+        }
+    }
+}
+
+public class GameRecord
+{
+    public Guid GameId { get; }
+    public List<MoveRecord> Moves { get; }
+    public PlayerSymbol? Winner { get; set; }
+    public DateTime GameDate { get; }
+
+    public GameRecord()
+    {
+        GameId = Guid.NewGuid();
+        Moves = new List<MoveRecord>();
+        GameDate = DateTime.Now;
+    }
+}
+
+public class MoveRecord
+{
+    public PlayerSymbol Player { get; set; }
+    public int Row { get; set; }
+    public int Column { get; set; }
+    public int MoveNumber { get; set; }
+}
+
+public class PlayerStats
+{
+    public int TotalGames { get; set; }
+    public int Wins { get; set; }
+    public int Losses { get; set; }
+    public int Draws { get; set; }
+    public int TotalMoves { get; set; }
+    public int CenterMoves { get; set; }
+    public int CornerMoves { get; set; }
+    public decimal AverageMovesPerGame => TotalGames == 0 ? 0 : (decimal)TotalMoves / TotalGames;
+}
+
 }
     public bool RemoveStock(string productId, int quantity)
     {
