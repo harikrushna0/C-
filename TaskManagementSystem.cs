@@ -926,6 +926,9 @@ public class PlayerStats
 }
 
 }
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace TaskManagement
 {
@@ -946,6 +949,11 @@ namespace TaskManagement
         public List<Comment> Comments { get; private set; }
         public List<TaskHistory> History { get; private set; }
         public List<Attachment> Attachments { get; private set; }
+        public List<string> Tags { get; private set; }
+        public List<TaskItem> SubTasks { get; private set; }
+        public List<Guid> DependencyIds { get; private set; }
+        public List<Reminder> Reminders { get; private set; }
+        public string Category { get; set; }
 
         public TaskItem(string title, string description)
         {
@@ -958,6 +966,10 @@ namespace TaskManagement
             Comments = new List<Comment>();
             History = new List<TaskHistory>();
             Attachments = new List<Attachment>();
+            Tags = new List<string>();
+            SubTasks = new List<TaskItem>();
+            DependencyIds = new List<Guid>();
+            Reminders = new List<Reminder>();
             AddHistory("Task created");
         }
 
@@ -971,6 +983,89 @@ namespace TaskManagement
         {
             Attachments.Add(new Attachment(fileName, content));
             AddHistory($"Attachment added: {fileName}");
+        }
+
+        public void AddTag(string tag)
+        {
+            if (!Tags.Contains(tag))
+            {
+                Tags.Add(tag);
+                AddHistory($"Tag added: {tag}");
+            }
+        }
+
+        public void RemoveTag(string tag)
+        {
+            if (Tags.Remove(tag))
+            {
+                AddHistory($"Tag removed: {tag}");
+            }
+        }
+
+        public void AddSubTask(TaskItem subTask)
+        {
+            SubTasks.Add(subTask);
+            AddHistory($"Sub-task added: {subTask.Title}");
+        }
+
+        public void AddDependency(Guid dependencyId)
+        {
+            if (!DependencyIds.Contains(dependencyId))
+            {
+                DependencyIds.Add(dependencyId);
+                AddHistory($"Dependency added: {dependencyId}");
+            }
+        }
+
+        public void MarkComplete()
+        {
+            if (Status != TaskStatus.Completed)
+            {
+                Status = TaskStatus.Completed;
+                CompletedDate = DateTime.Now;
+                AddHistory("Task marked as completed");
+            }
+        }
+
+        public void ScheduleReminder(DateTime remindAt, string message)
+        {
+            Reminders.Add(new Reminder(remindAt, message));
+            AddHistory($"Reminder scheduled at {remindAt}: {message}");
+        }
+
+        public void UpdateStatus(TaskStatus newStatus)
+        {
+            if (Status != newStatus)
+            {
+                Status = newStatus;
+                AddHistory($"Status updated to {newStatus}");
+            }
+        }
+
+        public void UpdatePriority(TaskPriority newPriority)
+        {
+            if (Priority != newPriority)
+            {
+                Priority = newPriority;
+                AddHistory($"Priority updated to {newPriority}");
+            }
+        }
+
+        public List<Reminder> GetUpcomingReminders()
+        {
+            return Reminders.Where(r => r.RemindAt > DateTime.Now).OrderBy(r => r.RemindAt).ToList();
+        }
+
+        public void PrintSummary()
+        {
+            Console.WriteLine($"[{Status}] {Title} - {Priority}");
+            Console.WriteLine($"Assigned To: {AssignedTo}");
+            Console.WriteLine($"Due: {DueDate?.ToShortDateString() ?? "N/A"}");
+            Console.WriteLine($"Tags: {string.Join(", ", Tags)}");
+            Console.WriteLine($"Sub-tasks: {SubTasks.Count}");
+            Console.WriteLine($"Attachments: {Attachments.Count}");
+            Console.WriteLine($"Reminders: {Reminders.Count}");
+            Console.WriteLine($"History Records: {History.Count}");
         }
 
         private void AddHistory(string description)
@@ -1034,20 +1129,56 @@ namespace TaskManagement
         }
     }
 
-   public class TaskAnalytics
-{
-    public int TotalTasks { get; set; }
-    public int CompletedTasks { get; set; }
-    public int OverdueTasks { get; set; }
-    public Dictionary<TaskPriority, int> TasksByPriority { get; set; }
-    public TimeSpan? AverageCompletionTime { get; set; }
-    public string MostActiveUser { get; set; }
-
-    public override string ToString()
+    public class Reminder
     {
-        var avgTime = AverageCompletionTime.HasValue ? AverageCompletionTime.Value.ToString(@"hh\:mm\:ss") : "N/A";
-        return $"Total Tasks: {TotalTasks}\nCompleted: {CompletedTasks}\nOverdue: {OverdueTasks}\n" +
-               $"Average Completion: {avgTime}\nMost Active User: {MostActiveUser}";
+        public DateTime RemindAt { get; set; }
+        public string Message { get; set; }
+
+        public Reminder(DateTime remindAt, string message)
+        {
+            RemindAt = remindAt;
+            Message = message;
+        }
+    }
+
+    public class TaskAnalytics
+    {
+        public int TotalTasks { get; set; }
+        public int CompletedTasks { get; set; }
+        public int OverdueTasks { get; set; }
+        public Dictionary<TaskPriority, int> TasksByPriority { get; set; } = new();
+        public TimeSpan? AverageCompletionTime { get; set; }
+        public string MostActiveUser { get; set; }
+
+        public override string ToString()
+        {
+            var avgTime = AverageCompletionTime.HasValue ? AverageCompletionTime.Value.ToString(@"hh\:mm\:ss") : "N/A";
+            return $"Total Tasks: {TotalTasks}\nCompleted: {CompletedTasks}\nOverdue: {OverdueTasks}\n" +
+                   $"Average Completion: {avgTime}\nMost Active User: {MostActiveUser}";
+        }
+
+        public void AddTask(TaskItem task)
+        {
+            TotalTasks++;
+            if (task.Status == TaskStatus.Completed) CompletedTasks++;
+            if (task.DueDate.HasValue && task.DueDate < DateTime.Now && task.Status != TaskStatus.Completed)
+                OverdueTasks++;
+
+            if (!TasksByPriority.ContainsKey(task.Priority))
+                TasksByPriority[task.Priority] = 0;
+            TasksByPriority[task.Priority]++;
+        }
+
+        public void CalculateAverageCompletionTime(IEnumerable<TaskItem> tasks)
+        {
+            var durations = tasks
+                .Where(t => t.CompletedDate.HasValue)
+                .Select(t => (t.CompletedDate.Value - t.CreatedDate).TotalSeconds)
+                .ToList();
+
+            if (durations.Any())
+                AverageCompletionTime = TimeSpan.FromSeconds(durations.Average());
+        }
     }
 }
 

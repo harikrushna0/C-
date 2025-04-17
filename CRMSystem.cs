@@ -73,61 +73,123 @@ public class Repository<T> where T : class {
     public int Count => _items.Count;
 }
 
-// Inventory Service
-public class InventoryService {
-    private readonly Repository<Product> _productRepo = new();
-    private readonly Repository<Order> _orderRepo = new();
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+/// <summary>
+/// Simple logger interface
+/// </summary>
+public interface ILogger {
+    void Info(string message);
+    void Warn(string message);
+    void Error(string message);
+}
+
+public class ConsoleLogger : ILogger {
+    public void Info(string message) => Console.WriteLine($"[INFO]: {message}");
+    public void Warn(string message) => Console.WriteLine($"[WARN]: {message}");
+    public void Error(string message) => Console.WriteLine($"[ERROR]: {message}");
+}
+
+/// <summary>
+/// Represents a simple repository interface
+/// </summary>
+public interface IRepository<T> {
+    void Add(T item);
+    IEnumerable<T> GetAll();
+}
+
+/// <summary>
+/// Product and Order DTOs
+/// </summary>
+public class Product {
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public decimal Price { get; set; }
+}
+
+public class Order {
+    public string Id { get; set; }
+    public List<(string ProductId, int Quantity)> Products { get; set; }
+    public string Status { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class InventoryItem {
+    public Product Product { get; set; }
+    public int Quantity { get; set; }
+}
+
+/// <summary>
+/// Inventory Manager handling products and orders
+/// </summary>
+public class InventoryManager {
     private readonly List<InventoryItem> _inventory = new();
+    private readonly IRepository<Product> _productRepo;
+    private readonly IRepository<Order> _orderRepo;
+    private readonly ILogger _logger;
 
-    public void AddProduct(Product product) {
-        if (string.IsNullOrWhiteSpace(product?.Id) || product.Price <= 0) {
-            throw new ArgumentException("Invalid product data", nameof(product));
-        }
-        if (_productRepo.Find(p => p.Id == product.Id) != null) {
-            throw new InvalidOperationException("Product already exists");
-        }
-        _productRepo.Add(product);
+    public InventoryManager(IRepository<Product> productRepo, IRepository<Order> orderRepo, ILogger logger) {
+        _productRepo = productRepo;
+        _orderRepo = orderRepo;
+        _logger = logger;
     }
 
-    public bool AddStock(string productId, int quantity) {
-        if (string.IsNullOrEmpty(productId) || quantity <= 0) return false;
-
-        var product = _productRepo.Find(p => p.Id == productId);
-        if (product == null) return false;
-
-        var item = _inventory.FirstOrDefault(i => i.Product.Id == productId);
-        if (item != null) {
-            item.Quantity += quantity;
-        } else {
-            _inventory.Add(new InventoryItem { Product = product, Quantity = quantity });
-        }
-
-        return true;
-    }
-
+    /// <summary>
+    /// Attempts to remove stock for a given product
+    /// </summary>
     public bool RemoveStock(string productId, int quantity) {
-        if (string.IsNullOrEmpty(productId) || quantity <= 0) return false;
+        if (string.IsNullOrEmpty(productId)) {
+            _logger.Warn("RemoveStock failed: productId is null or empty.");
+            return false;
+        }
+
+        if (quantity <= 0) {
+            _logger.Warn("RemoveStock failed: quantity must be positive.");
+            return false;
+        }
 
         var item = _inventory.FirstOrDefault(i => i.Product.Id == productId);
-        if (item == null || item.Quantity < quantity) return false;
+        if (item == null) {
+            _logger.Warn($"RemoveStock failed: product {productId} not found.");
+            return false;
+        }
+
+        if (item.Quantity < quantity) {
+            _logger.Warn($"RemoveStock failed: insufficient quantity for {productId}.");
+            return false;
+        }
 
         item.Quantity -= quantity;
+        _logger.Info($"Removed {quantity} units of {productId}. Remaining: {item.Quantity}");
+
         if (item.Quantity == 0) {
             _inventory.RemoveAll(i => i.Product.Id == productId);
+            _logger.Info($"Product {productId} removed from inventory as quantity reached zero.");
         }
 
         return true;
     }
 
+    /// <summary>
+    /// Creates a new order if all products are in stock
+    /// </summary>
     public Order CreateOrder(List<(string ProductId, int Quantity)> productList) {
-        if (productList == null || productList.Count == 0)
+        if (productList == null || !productList.Any()) {
+            _logger.Error("CreateOrder failed: product list is empty.");
             throw new ArgumentException("Empty product list");
+        }
 
-        foreach (var (productId, qty) in productList) {
-            var item = _inventory.FirstOrDefault(i => i.Product.Id == productId);
-            if (item == null || item.Quantity < qty) {
-                throw new InvalidOperationException($"Insufficient stock for product: {productId}");
-            }
+        var unavailableProducts = productList
+            .Where(p => !_inventory.Any(i => i.Product.Id == p.ProductId && i.Quantity >= p.Quantity))
+            .Select(p => p.ProductId)
+            .ToList();
+
+        if (unavailableProducts.Any()) {
+            var message = $"Insufficient stock for: {string.Join(", ", unavailableProducts)}";
+            _logger.Error(message);
+            throw new InvalidOperationException(message);
         }
 
         var order = new Order {
@@ -141,16 +203,86 @@ public class InventoryService {
             RemoveStock(productId, qty);
         }
 
+        // Simulate shipping/delivery
+        SimulateShipping(order);
+
         order.Status = "completed";
         _orderRepo.Add(order);
+        _logger.Info($"Order {order.Id} created successfully with status: {order.Status}");
+
         return order;
     }
 
-    public IEnumerable<Product> GetAllProducts() => _productRepo.GetAll();
+    private void SimulateShipping(Order order) {
+        _logger.Info($"Shipping order {order.Id}...");
+        // Simulate tracking/notification here
+    }
 
-    public IEnumerable<InventoryItem> GetInventoryStatus() => _inventory.ToList();
+    public IEnumerable<Product> GetAllProducts() {
+        _logger.Info("Retrieving all products...");
+        return _productRepo.GetAll();
+    }
 
-    public IEnumerable<Order> GetAllOrders() => _orderRepo.GetAll();
+    public IEnumerable<InventoryItem> GetInventoryStatus() {
+        _logger.Info("Retrieving current inventory status...");
+        return _inventory.ToList();
+    }
+
+    public IEnumerable<Order> GetAllOrders() {
+        _logger.Info("Retrieving all orders...");
+        return _orderRepo.GetAll();
+    }
+
+    /// <summary>
+    /// Adds new stock to inventory
+    /// </summary>
+    public void AddStock(Product product, int quantity) {
+        if (quantity <= 0) {
+            _logger.Warn("AddStock failed: Quantity must be greater than zero.");
+            return;
+        }
+
+        var item = _inventory.FirstOrDefault(i => i.Product.Id == product.Id);
+        if (item != null) {
+            item.Quantity += quantity;
+            _logger.Info($"Updated stock for {product.Name}: +{quantity} (Total: {item.Quantity})");
+        } else {
+            _inventory.Add(new InventoryItem { Product = product, Quantity = quantity });
+            _logger.Info($"Added new product to inventory: {product.Name} with quantity {quantity}");
+        }
+    }
+
+    public InventoryReport GenerateReport() {
+        return new InventoryReport {
+            TotalProducts = _inventory.Count,
+            LowStockItems = _inventory.Where(i => i.Quantity < 5).ToList(),
+            LastGenerated = DateTime.UtcNow
+        };
+    }
+}
+
+/// <summary>
+/// Report summary
+/// </summary>
+public class InventoryReport {
+    public int TotalProducts { get; set; }
+    public List<InventoryItem> LowStockItems { get; set; }
+    public DateTime LastGenerated { get; set; }
+
+    public void Print() {
+        Console.WriteLine($"Inventory Report at {LastGenerated}");
+        Console.WriteLine($"Total Products: {TotalProducts}");
+        if (LowStockItems.Any()) {
+            Console.WriteLine("Low Stock Items:");
+            foreach (var item in LowStockItems) {
+                Console.WriteLine($" - {item.Product.Name} (Qty: {item.Quantity})");
+            }
+        } else {
+            Console.WriteLine("All products sufficiently stocked.");
+        }
+    }
+}
+
 }
 
 
