@@ -212,90 +212,142 @@ namespace TaskManagement
         }
     }
 
-    public class TaskAnalytics
+   public class TaskAnalytics
+{
+    public int TotalTasks { get; set; }
+    public int CompletedTasks { get; set; }
+    public int OverdueTasks { get; set; }
+    public Dictionary<TaskPriority, int> TasksByPriority { get; set; }
+    public TimeSpan? AverageCompletionTime { get; set; }
+    public string MostActiveUser { get; set; }
+
+    public override string ToString()
     {
-        public int TotalTasks { get; set; }
-        public int CompletedTasks { get; set; }
-        public int OverdueTasks { get; set; }
-        public Dictionary<TaskPriority, int> TasksByPriority { get; set; }
-        public TimeSpan? AverageCompletionTime { get; set; }
-        public string MostActiveUser { get; set; }
+        var avgTime = AverageCompletionTime.HasValue ? AverageCompletionTime.Value.ToString(@"hh\:mm\:ss") : "N/A";
+        return $"Total Tasks: {TotalTasks}\nCompleted: {CompletedTasks}\nOverdue: {OverdueTasks}\n" +
+               $"Average Completion: {avgTime}\nMost Active User: {MostActiveUser}";
+    }
+}
+
+public class TaskManager
+{
+    private readonly List<TaskItem> tasks;
+    private readonly Dictionary<string, List<TaskItem>> userTasks;
+
+    public TaskManager()
+    {
+        tasks = new List<TaskItem>();
+        userTasks = new Dictionary<string, List<TaskItem>>();
     }
 
-    public class TaskManager
+    public TaskItem CreateTask(string title, string description)
     {
-        private readonly List<TaskItem> tasks;
-        private readonly Dictionary<string, List<TaskItem>> userTasks;
+        if (string.IsNullOrWhiteSpace(title))
+            throw new ArgumentException("Title cannot be empty");
 
-        public TaskManager()
-        {
-            tasks = new List<TaskItem>();
-            userTasks = new Dictionary<string, List<TaskItem>>();
-        }
+        var task = new TaskItem(title, description);
+        tasks.Add(task);
+        return task;
+    }
 
-        public TaskItem CreateTask(string title, string description)
-        {
-            var task = new TaskItem(title, description);
-            tasks.Add(task);
-            return task;
-        }
+    public void AssignTask(Guid taskId, string assignee)
+    {
+        if (string.IsNullOrWhiteSpace(assignee))
+            throw new ArgumentException("Assignee cannot be empty");
 
-        public void AssignTask(Guid taskId, string assignee)
-        {
-            var task = GetTaskById(taskId);
-            if (task == null)
-                throw new ArgumentException("Task not found");
+        var task = GetTaskById(taskId);
+        if (task == null)
+            throw new ArgumentException("Task not found");
 
-            task.AssignedTo = assignee;
-            if (!userTasks.ContainsKey(assignee))
-                userTasks[assignee] = new List<TaskItem>();
+        task.AssignedTo = assignee;
+        if (!userTasks.ContainsKey(assignee))
+            userTasks[assignee] = new List<TaskItem>();
 
+        if (!userTasks[assignee].Contains(task))
             userTasks[assignee].Add(task);
-            task.History.Add(new TaskHistory($"Task assigned to {assignee}"));
-        }
 
-        public List<TaskItem> GetUserTasks(string username)
+        task.History.Add(new TaskHistory($"Task assigned to {assignee}"));
+    }
+
+    public List<TaskItem> GetUserTasks(string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            return new List<TaskItem>();
+
+        return userTasks.TryGetValue(username, out var userTaskList) ? userTaskList : new List<TaskItem>();
+    }
+
+    public List<TaskItem> GetTasksByStatus(TaskStatus status)
+    {
+        return tasks.Where(t => t.Status == status).ToList();
+    }
+
+    public List<TaskItem> GetTasksByPriority(TaskPriority priority)
+    {
+        return tasks.Where(t => t.Priority == priority).ToList();
+    }
+
+    public List<TaskItem> GetOverdueTasks()
+    {
+        var now = DateTime.Now;
+        return tasks.Where(t =>
+            t.DueDate.HasValue &&
+            t.DueDate.Value < now &&
+            t.Status != TaskStatus.Completed &&
+            t.Status != TaskStatus.Cancelled
+        ).ToList();
+    }
+
+    public void UpdateTaskStatus(Guid taskId, TaskStatus newStatus)
+    {
+        var task = GetTaskById(taskId);
+        if (task == null)
+            throw new ArgumentException("Task not found");
+
+        var previousStatus = task.Status;
+        if (previousStatus == newStatus)
+            return;
+
+        task.Status = newStatus;
+        task.History.Add(new TaskHistory($"Status changed from {previousStatus} to {newStatus}"));
+
+        if (newStatus == TaskStatus.Completed)
+            task.CompletedDate = DateTime.Now;
+    }
+
+    private TaskItem GetTaskById(Guid taskId)
+    {
+        return tasks.FirstOrDefault(t => t.Id == taskId);
+    }
+
+    public TaskAnalytics GetAnalytics()
+    {
+        var analytics = new TaskAnalytics();
+        analytics.TotalTasks = tasks.Count;
+        analytics.CompletedTasks = tasks.Count(t => t.Status == TaskStatus.Completed);
+        analytics.OverdueTasks = GetOverdueTasks().Count;
+
+        analytics.TasksByPriority = tasks
+            .GroupBy(t => t.Priority)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var completedTasks = tasks.Where(t => t.CompletedDate.HasValue && t.CreatedDate.HasValue).ToList();
+        if (completedTasks.Count > 0)
         {
-            return userTasks.ContainsKey(username) ? userTasks[username] : new List<TaskItem>();
+            var avgTicks = completedTasks
+                .Average(t => (t.CompletedDate.Value - t.CreatedDate.Value).Ticks);
+
+            analytics.AverageCompletionTime = TimeSpan.FromTicks((long)avgTicks);
         }
 
-        public List<TaskItem> GetTasksByStatus(TaskStatus status)
-        {
-            return tasks.Where(t => t.Status == status).ToList();
-        }
+        analytics.MostActiveUser = userTasks
+            .OrderByDescending(kv => kv.Value.Count)
+            .Select(kv => kv.Key)
+            .FirstOrDefault();
 
-        public List<TaskItem> GetTasksByPriority(TaskPriority priority)
-        {
-            return tasks.Where(t => t.Priority == priority).ToList();
-        }
-
-        public List<TaskItem> GetOverdueTasks()
-        {
-            return tasks.Where(t => t.DueDate.HasValue && 
-                                  t.DueDate.Value < DateTime.Now &&
-                                  t.Status != TaskStatus.Completed &&
-                                  t.Status != TaskStatus.Cancelled)
-                       .ToList();
-        }
-
-        public void UpdateTaskStatus(Guid taskId, TaskStatus newStatus)
-        {
-            var task = GetTaskById(taskId);
-            if (task == null)
-                throw new ArgumentException("Task not found");
-
-            var oldStatus = task.Status;
-            task.Status = newStatus;
-            task.History.Add(new TaskHistory($"Status changed from {oldStatus} to {newStatus}"));
-
-            if (newStatus == TaskStatus.Completed)
-                task.CompletedDate = DateTime.Now;
-        }
-
-        private TaskItem GetTaskById(Guid taskId)
-        {
-            return tasks.FirstOrDefault(t => t.Id == taskId);
-        }
+        return analytics;
+    }
+}
 
         public TaskAnalytics GetTaskAnalytics()
         {

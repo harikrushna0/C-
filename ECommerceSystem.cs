@@ -317,58 +317,129 @@ namespace ECommerce
     }
 
     public class Order
+{
+    public Guid Id { get; }
+    public User Customer { get; }
+    public List<OrderItem> Items { get; }
+    public OrderStatus Status { get; private set; }
+    public Address ShippingAddress { get; }
+    public Address BillingAddress { get; }
+    public PaymentMethod PaymentMethod { get; }
+    public decimal SubTotal => Items.Sum(item => item.Product.Price * item.Quantity);
+    public decimal ShippingCost { get; private set; }
+    public decimal TaxAmount { get; private set; }
+    public decimal Total => SubTotal + ShippingCost + TaxAmount;
+    public DateTime OrderDate { get; }
+    public DateTime? ShippedDate { get; private set; }
+    public string TrackingNumber { get; private set; }
+    public string Notes { get; private set; }
+    public bool IsGift { get; private set; }
+    public string CouponCode { get; private set; }
+    public decimal DiscountAmount { get; private set; }
+
+    public Order(User customer, Address shippingAddress, Address billingAddress, PaymentMethod paymentMethod)
     {
-        public Guid Id { get; }
-        public User Customer { get; }
-        public List<OrderItem> Items { get; }
-        public OrderStatus Status { get; private set; }
-        public Address ShippingAddress { get; }
-        public Address BillingAddress { get; }
-        public PaymentMethod PaymentMethod { get; }
-        public decimal SubTotal => Items.Sum(item => item.Product.Price * item.Quantity);
-        public decimal ShippingCost { get; private set; }
-        public decimal TaxAmount { get; private set; }
-        public decimal Total => SubTotal + ShippingCost + TaxAmount;
-        public DateTime OrderDate { get; }
-        public DateTime? ShippedDate { get; private set; }
-        public string TrackingNumber { get; private set; }
+        Id = Guid.NewGuid();
+        Customer = customer ?? throw new ArgumentNullException(nameof(customer));
+        ShippingAddress = shippingAddress ?? throw new ArgumentNullException(nameof(shippingAddress));
+        BillingAddress = billingAddress ?? throw new ArgumentNullException(nameof(billingAddress));
+        PaymentMethod = paymentMethod ?? throw new ArgumentNullException(nameof(paymentMethod));
+        Items = new List<OrderItem>();
+        Status = OrderStatus.Created;
+        OrderDate = DateTime.Now;
+        DiscountAmount = 0;
+    }
 
-        public Order(User customer, Address shippingAddress, Address billingAddress, PaymentMethod paymentMethod)
+    public void AddItem(Product product, int quantity)
+    {
+        if (product == null) throw new ArgumentNullException(nameof(product));
+        if (quantity <= 0) throw new ArgumentException("Quantity must be positive");
+
+        var existingItem = Items.FirstOrDefault(i => i.Product.Id == product.Id);
+        if (existingItem != null)
         {
-            Id = Guid.NewGuid();
-            Customer = customer;
-            Items = new List<OrderItem>();
-            Status = OrderStatus.Created;
-            ShippingAddress = shippingAddress;
-            BillingAddress = billingAddress;
-            PaymentMethod = paymentMethod;
-            OrderDate = DateTime.Now;
+            existingItem.UpdateQuantity(existingItem.Quantity + quantity);
         }
-
-        public void AddItem(Product product, int quantity)
+        else
         {
-            if (quantity <= 0)
-                throw new ArgumentException("Quantity must be positive");
-
-            var existingItem = Items.FirstOrDefault(i => i.Product.Id == product.Id);
-            if (existingItem != null)
-                existingItem.UpdateQuantity(existingItem.Quantity + quantity);
-            else
-                Items.Add(new OrderItem(product, quantity));
-        }
-
-        public void UpdateStatus(OrderStatus newStatus)
-        {
-            Status = newStatus;
-            if (newStatus == OrderStatus.Shipped)
-                ShippedDate = DateTime.Now;
-        }
-
-        public void SetTrackingNumber(string trackingNumber)
-        {
-            TrackingNumber = trackingNumber;
+            Items.Add(new OrderItem(product, quantity));
         }
     }
+
+    public void RemoveItem(Guid productId)
+    {
+        var item = Items.FirstOrDefault(i => i.Product.Id == productId);
+        if (item != null) Items.Remove(item);
+    }
+
+    public void ApplyCoupon(string couponCode, decimal discount)
+    {
+        if (string.IsNullOrWhiteSpace(couponCode)) throw new ArgumentException("Invalid coupon code");
+        if (discount <= 0) throw new ArgumentException("Invalid discount amount");
+
+        CouponCode = couponCode;
+        DiscountAmount = discount;
+    }
+
+    public void MarkAsGift(string note = null)
+    {
+        IsGift = true;
+        Notes = note;
+    }
+
+    public void UpdateStatus(OrderStatus newStatus)
+    {
+        if (!Enum.IsDefined(typeof(OrderStatus), newStatus))
+            throw new ArgumentException("Invalid status");
+
+        if (Status == OrderStatus.Cancelled)
+            throw new InvalidOperationException("Cannot change status of a cancelled order");
+
+        Status = newStatus;
+
+        if (newStatus == OrderStatus.Shipped)
+        {
+            ShippedDate = DateTime.Now;
+        }
+        else if (newStatus == OrderStatus.Delivered && string.IsNullOrEmpty(TrackingNumber))
+        {
+            throw new InvalidOperationException("Cannot mark as delivered without tracking info");
+        }
+    }
+
+    public void SetTrackingNumber(string trackingNumber)
+    {
+        if (string.IsNullOrWhiteSpace(trackingNumber))
+            throw new ArgumentException("Tracking number cannot be empty");
+
+        TrackingNumber = trackingNumber;
+    }
+
+    public void SetShippingCost(decimal cost)
+    {
+        if (cost < 0) throw new ArgumentOutOfRangeException(nameof(cost), "Shipping cost cannot be negative");
+        ShippingCost = cost;
+    }
+
+    public void SetTaxAmount(decimal tax)
+    {
+        if (tax < 0) throw new ArgumentOutOfRangeException(nameof(tax), "Tax amount cannot be negative");
+        TaxAmount = tax;
+    }
+
+    public decimal GetFinalTotal()
+    {
+        var finalTotal = SubTotal + ShippingCost + TaxAmount - DiscountAmount;
+        return finalTotal < 0 ? 0 : finalTotal;
+    }
+
+    public override string ToString()
+    {
+        return $"Order ID: {Id}\nCustomer: {Customer?.Name}\nStatus: {Status}\n" +
+               $"Items: {Items.Count}\nTotal: {GetFinalTotal():C2}\nOrdered: {OrderDate:yyyy-MM-dd}";
+    }
+}
+
 
     public enum OrderStatus
     {
