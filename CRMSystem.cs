@@ -661,6 +661,30 @@ namespace CRMSystem
         }
     }
 
+    public class CampaignActivity
+    {
+        public Guid Id { get; }
+        public string Type { get; }
+        public string Description { get; }
+        public DateTime ActivityDate { get; }
+
+        public CampaignActivity(string type, string description)
+        {
+            Id = Guid.NewGuid();
+            Type = type;
+            Description = description;
+            ActivityDate = DateTime.Now;
+        }
+    }
+    public class CampaignReport
+    {
+        public Guid CampaignId { get; set; }
+        public int LeadCount { get; set; }
+        public int ConversionCount { get; set; }
+        public decimal ConversionRate { get; set; }
+        public decimal ROI { get; set; }
+    }
+
     public class CampaignManager
     {
         private readonly Dictionary<Guid, Campaign> campaigns;
@@ -1070,90 +1094,233 @@ namespace CRMSystem
         }
     }
 
-    public class WorkflowContext
+    using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+// Models and Context
+public class WorkflowContext
+{
+    public Dictionary<string, object> Data { get; }
+    public List<WorkflowAction> Actions { get; }
+    public WorkflowStatus Status { get; private set; }
+    public DateTime StartTime { get; }
+    public DateTime? EndTime { get; private set; }
+    public string WorkflowName { get; set; }
+    public string Initiator { get; set; }
+    public List<string> Logs { get; }
+
+    public WorkflowContext(string workflowName, string initiator)
     {
-        public Dictionary<string, object> Data { get; }
-        public List<WorkflowAction> Actions { get; }
-        public WorkflowStatus Status { get; private set; }
-        public DateTime StartTime { get; }
-        public DateTime? EndTime { get; private set; }
-
-        public WorkflowContext()
-        {
-            Data = new Dictionary<string, object>();
-            Actions = new List<WorkflowAction>();
-            Status = WorkflowStatus.Pending;
-            StartTime = DateTime.Now;
-        }
-
-        public void Complete()
-        {
-            Status = WorkflowStatus.Completed;
-            EndTime = DateTime.Now;
-        }
-
-        public void Fail(string reason)
-        {
-            Status = WorkflowStatus.Failed;
-            EndTime = DateTime.Now;
-            Data["FailureReason"] = reason;
-        }
+        Data = new Dictionary<string, object>();
+        Actions = new List<WorkflowAction>();
+        Logs = new List<string>();
+        WorkflowName = workflowName;
+        Initiator = initiator;
+        Status = WorkflowStatus.Pending;
+        StartTime = DateTime.Now;
     }
 
-    public abstract class Workflow
+    public void Complete()
     {
-        protected readonly List<WorkflowStep> steps;
+        Status = WorkflowStatus.Completed;
+        EndTime = DateTime.Now;
+        Logs.Add("Workflow completed.");
+    }
 
-        protected Workflow()
-        {
-            steps = new List<WorkflowStep>();
-        }
+    public void Fail(string reason)
+    {
+        Status = WorkflowStatus.Failed;
+        EndTime = DateTime.Now;
+        Data["FailureReason"] = reason;
+        Logs.Add($"Workflow failed: {reason}");
+    }
 
-        public virtual void Execute(WorkflowContext context)
+    public void Log(string message)
+    {
+        Logs.Add($"{DateTime.Now}: {message}");
+    }
+
+    public void SetData(string key, object value)
+    {
+        if (Data.ContainsKey(key))
+            Data[key] = value;
+        else
+            Data.Add(key, value);
+    }
+
+    public T GetData<T>(string key)
+    {
+        if (Data.TryGetValue(key, out var value) && value is T typed)
+            return typed;
+        return default;
+    }
+
+    public void AddAction(WorkflowAction action)
+    {
+        Actions.Add(action);
+        Log($"Action added: {action.Name}");
+    }
+}
+
+// Workflow Base
+public abstract class Workflow
+{
+    protected readonly List<WorkflowStep> steps;
+
+    public string Name { get; set; }
+    public string Description { get; set; }
+    public TimeSpan Timeout { get; set; }
+
+    protected Workflow(string name)
+    {
+        Name = name;
+        Description = string.Empty;
+        steps = new List<WorkflowStep>();
+        Timeout = TimeSpan.FromMinutes(10);
+    }
+
+    public void AddStep(WorkflowStep step)
+    {
+        steps.Add(step);
+    }
+
+    public virtual void Execute(WorkflowContext context)
+    {
+        context.Log($"Executing workflow: {Name}");
+        context.Status = WorkflowStatus.InProgress;
+
+        foreach (var step in steps)
         {
-            foreach (var step in steps)
+            try
             {
-                try
-                {
-                    step.Execute(context);
-                }
-                catch (Exception ex)
-                {
-                    context.Fail(ex.Message);
-                    throw;
-                }
+                context.Log($"Starting step: {step.Name}");
+                step.Execute(context);
+                context.Log($"Finished step: {step.Name}");
             }
-            context.Complete();
+            catch (Exception ex)
+            {
+                context.Log($"Exception in step '{step.Name}': {ex.Message}");
+                context.Fail(ex.Message);
+                return;
+            }
         }
+
+        context.Complete();
     }
 
-    public abstract class WorkflowStep
+    public async Task ExecuteAsync(WorkflowContext context)
     {
-        public string Name { get; }
-        public bool IsRequired { get; }
+        context.Log($"Async execution started for: {Name}");
+        context.Status = WorkflowStatus.InProgress;
 
-        protected WorkflowStep(string name, bool isRequired = true)
+        foreach (var step in steps)
         {
-            Name = name;
-            IsRequired = isRequired;
+            try
+            {
+                context.Log($"Starting async step: {step.Name}");
+                await step.ExecuteAsync(context);
+                context.Log($"Completed async step: {step.Name}");
+            }
+            catch (Exception ex)
+            {
+                context.Log($"Async step '{step.Name}' failed: {ex.Message}");
+                context.Fail(ex.Message);
+                return;
+            }
         }
 
-        public abstract void Execute(WorkflowContext context);
+        context.Complete();
+    }
+}
+
+// Step Base
+public abstract class WorkflowStep
+{
+    public string Name { get; }
+    public bool IsRequired { get; }
+    public TimeSpan? DelayAfter { get; set; }
+
+    protected WorkflowStep(string name, bool isRequired = true)
+    {
+        Name = name;
+        IsRequired = isRequired;
     }
 
-    public enum WorkflowStatus
+    public abstract void Execute(WorkflowContext context);
+
+    public virtual Task ExecuteAsync(WorkflowContext context)
     {
-        Pending,
-        InProgress,
-        Completed,
-        Failed
+        Execute(context);
+        return Task.CompletedTask;
+    }
+}
+
+// Supporting Structures
+public enum WorkflowStatus
+{
+    Pending,
+    InProgress,
+    Completed,
+    Failed
+}
+
+public enum NotificationType
+{
+    Info,
+    Warning,
+    Error,
+    Success
+}
+
+public class WorkflowAction
+{
+    public string Name { get; set; }
+    public DateTime PerformedAt { get; set; }
+    public string PerformedBy { get; set; }
+    public string Description { get; set; }
+
+    public WorkflowAction(string name, string performedBy, string description)
+    {
+        Name = name;
+        PerformedBy = performedBy;
+        Description = description;
+        PerformedAt = DateTime.Now;
+    }
+}
+
+// Example Step
+public class NotifyStep : WorkflowStep
+{
+    public NotificationType Type { get; }
+
+    public NotifyStep(string name, NotificationType type) : base(name)
+    {
+        Type = type;
     }
 
-    public enum NotificationType
+    public override void Execute(WorkflowContext context)
     {
-        Info,
-        Warning,
-        Error,
-        Success
+        context.Log($"Notification sent: {Type}");
+    }
+}
+
+// Another Example Step
+public class DataUpdateStep : WorkflowStep
+{
+    private readonly string _key;
+    private readonly object _value;
+
+    public DataUpdateStep(string name, string key, object value) : base(name)
+    {
+        _key = key;
+        _value = value;
+    }
+
+    public override void Execute(WorkflowContext context)
+    {
+        context.SetData(_key, _value);
+        context.Log($"Data key '{_key}' updated with value: {_value}");
     }
 }

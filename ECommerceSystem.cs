@@ -407,37 +407,115 @@ namespace ECommerce
         }
     }
 
-    public void SetTrackingNumber(string trackingNumber)
+    public void SetShippingAddress(Address address)
     {
-        if (string.IsNullOrWhiteSpace(trackingNumber))
-            throw new ArgumentException("Tracking number cannot be empty");
+        if (address == null) throw new ArgumentNullException(nameof(address));
+        ShippingAddress = address;
+    }
+    public void SetBillingAddress(Address address)
+    {
+        if (address == null) throw new ArgumentNullException(nameof(address));
+        BillingAddress = address;
+    }
+    public void SetPaymentMethod(PaymentMethod method)
+    {
+        if (method == null) throw new ArgumentNullException(nameof(method));
+        PaymentMethod = method;
+    }
+    public void SetNotes(string notes)
+    {
+        Notes = notes;
+    }
+    public void SetGift(bool isGift)
+    {
+        IsGift = isGift;
+    }
+    public void SetTrackingInfo(string trackingNumber, string carrier)
+    {
+        if (string.IsNullOrWhiteSpace(trackingNumber)) throw new ArgumentException("Invalid tracking number");
+        if (string.IsNullOrWhiteSpace(carrier)) throw new ArgumentException("Invalid carrier name");
 
         TrackingNumber = trackingNumber;
+        // Carrier can be stored or used for shipping label generation
+    }
+    public void SetShippingCarrier(string carrier)
+    {
+        if (string.IsNullOrWhiteSpace(carrier)) throw new ArgumentException("Carrier name cannot be empty");
+        // Carrier can be stored or used for shipping label generation
+    }
+    public void SetShippingDate(DateTime date)
+    {
+        if (date < OrderDate) throw new ArgumentOutOfRangeException(nameof(date), "Shipping date cannot be before order date");
+        ShippedDate = date;
     }
 
-    public void SetShippingCost(decimal cost)
-    {
-        if (cost < 0) throw new ArgumentOutOfRangeException(nameof(cost), "Shipping cost cannot be negative");
-        ShippingCost = cost;
-    }
+   public void SetTrackingNumber(string trackingNumber)
+{
+    if (string.IsNullOrWhiteSpace(trackingNumber))
+        throw new ArgumentException("Tracking number cannot be empty or whitespace", nameof(trackingNumber));
 
-    public void SetTaxAmount(decimal tax)
-    {
-        if (tax < 0) throw new ArgumentOutOfRangeException(nameof(tax), "Tax amount cannot be negative");
-        TaxAmount = tax;
-    }
+    if (trackingNumber.Length < 5)
+        throw new ArgumentException("Tracking number must be at least 5 characters long", nameof(trackingNumber));
 
-    public decimal GetFinalTotal()
-    {
-        var finalTotal = SubTotal + ShippingCost + TaxAmount - DiscountAmount;
-        return finalTotal < 0 ? 0 : finalTotal;
-    }
+    TrackingNumber = trackingNumber;
+    // Log tracking assignment or notify shipping system
+    // Log($"Tracking number set: {trackingNumber}");
+}
 
-    public override string ToString()
-    {
-        return $"Order ID: {Id}\nCustomer: {Customer?.Name}\nStatus: {Status}\n" +
-               $"Items: {Items.Count}\nTotal: {GetFinalTotal():C2}\nOrdered: {OrderDate:yyyy-MM-dd}";
-    }
+public void SetShippingCost(decimal cost)
+{
+    if (cost < 0)
+        throw new ArgumentOutOfRangeException(nameof(cost), "Shipping cost cannot be negative");
+
+    if (cost > 1000)
+        throw new ArgumentException("Shipping cost seems unusually high", nameof(cost));
+
+    ShippingCost = Math.Round(cost, 2);
+    // Log($"Shipping cost set to {ShippingCost:C2}");
+}
+
+public void SetTaxAmount(decimal tax)
+{
+    if (tax < 0)
+        throw new ArgumentOutOfRangeException(nameof(tax), "Tax amount cannot be negative");
+
+    if (tax > SubTotal)
+        throw new InvalidOperationException("Tax amount cannot exceed subtotal");
+
+    TaxAmount = Math.Round(tax, 2);
+    // Log($"Tax amount set to {TaxAmount:C2}");
+}
+
+public decimal GetFinalTotal()
+{
+    var totalBeforeDiscount = SubTotal + ShippingCost + TaxAmount;
+    var discounted = totalBeforeDiscount - DiscountAmount;
+
+    if (DiscountAmount > totalBeforeDiscount)
+        discounted = 0;
+
+    return Math.Round(discounted, 2);
+}
+
+public override string ToString()
+{
+    var details = new StringBuilder();
+    details.AppendLine($"Order ID     : {Id}");
+    details.AppendLine($"Customer     : {Customer?.Name ?? "N/A"}");
+    details.AppendLine($"Status       : {Status}");
+    details.AppendLine($"Items        : {Items.Count}");
+    details.AppendLine($"Subtotal     : {SubTotal:C2}");
+    details.AppendLine($"Shipping     : {ShippingCost:C2}");
+    details.AppendLine($"Tax          : {TaxAmount:C2}");
+    details.AppendLine($"Discount     : {DiscountAmount:C2}");
+    details.AppendLine($"Final Total  : {GetFinalTotal():C2}");
+    details.AppendLine($"Order Date   : {OrderDate:yyyy-MM-dd}");
+    if (!string.IsNullOrEmpty(TrackingNumber))
+        details.AppendLine($"Tracking No. : {TrackingNumber}");
+
+    return details.ToString();
+}
+
 }
 
 
