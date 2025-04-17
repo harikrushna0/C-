@@ -1009,7 +1009,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-
 namespace TicTacToe
 {
     public enum PlayerSymbol
@@ -1027,6 +1026,11 @@ namespace TicTacToe
         public Board()
         {
             grid = new PlayerSymbol[Size, Size];
+            Reset();
+        }
+
+        public void Reset()
+        {
             for (int i = 0; i < Size; i++)
                 for (int j = 0; j < Size; j++)
                     grid[i, j] = PlayerSymbol.None;
@@ -1052,21 +1056,17 @@ namespace TicTacToe
 
         public bool CheckWin(PlayerSymbol symbol)
         {
-            // Check rows for a win
             for (int i = 0; i < Size; i++)
                 if (grid[i, 0] == symbol && grid[i, 1] == symbol && grid[i, 2] == symbol)
                     return true;
 
-            // Check columns for a win
             for (int j = 0; j < Size; j++)
                 if (grid[0, j] == symbol && grid[1, j] == symbol && grid[2, j] == symbol)
                     return true;
 
-            // Check main diagonal
             if (grid[0, 0] == symbol && grid[1, 1] == symbol && grid[2, 2] == symbol)
                 return true;
 
-            // Check anti-diagonal
             if (grid[0, 2] == symbol && grid[1, 1] == symbol && grid[2, 0] == symbol)
                 return true;
 
@@ -1099,6 +1099,7 @@ namespace TicTacToe
         public bool IsHuman { get; set; }
         public int Wins { get; set; }
         public int Draws { get; set; }
+        public int Losses { get; set; }
 
         public Player(string name, PlayerSymbol symbol, bool isHuman = true)
         {
@@ -1107,11 +1108,12 @@ namespace TicTacToe
             IsHuman = isHuman;
             Wins = 0;
             Draws = 0;
+            Losses = 0;
         }
 
         public string GetScore()
         {
-            return $"{Name}: {Wins} Wins, {Draws} Draws";
+            return $"{Name}: {Wins} Wins, {Draws} Draws, {Losses} Losses";
         }
     }
 
@@ -1122,6 +1124,7 @@ namespace TicTacToe
         private int currentPlayerIndex;
         private bool singlePlayer;
         private List<string> gameHistory;
+        private int gameCount;
 
         public Game(bool singlePlayer = false)
         {
@@ -1129,6 +1132,7 @@ namespace TicTacToe
             this.singlePlayer = singlePlayer;
             gameHistory = new List<string>();
             InitializePlayers();
+            gameCount = 0;
         }
 
         private void InitializePlayers()
@@ -1159,7 +1163,27 @@ namespace TicTacToe
         public void Start()
         {
             DisplayTitleScreen();
+            bool exit = false;
+            while (!exit)
+            {
+                PlayGame();
+                Console.Write("Play again? (y/n): ");
+                string? input = Console.ReadLine()?.Trim().ToLower();
+                if (input != "y")
+                    exit = true;
+                else
+                {
+                    board.Reset();
+                    currentPlayerIndex = gameCount % 2;
+                }
+            }
+            Console.WriteLine("Thanks for playing!");
+        }
+
+        private void PlayGame()
+        {
             bool gameOver = false;
+            gameCount++;
             board.Display();
             DisplayScores();
 
@@ -1180,7 +1204,8 @@ namespace TicTacToe
                 {
                     Console.WriteLine($"{currentPlayer.Name} wins!");
                     currentPlayer.Wins++;
-                    gameHistory.Add($"{currentPlayer.Name} ({currentPlayer.Symbol}) won");
+                    players[(currentPlayerIndex + 1) % 2].Losses++;
+                    gameHistory.Add($"Game {gameCount}: {currentPlayer.Name} ({currentPlayer.Symbol}) won");
                     gameOver = true;
                 }
                 else if (board.IsFull())
@@ -1188,7 +1213,7 @@ namespace TicTacToe
                     Console.WriteLine("It's a draw!");
                     players[0].Draws++;
                     players[1].Draws++;
-                    gameHistory.Add("Draw");
+                    gameHistory.Add($"Game {gameCount}: Draw");
                     gameOver = true;
                 }
                 else
@@ -1198,13 +1223,6 @@ namespace TicTacToe
             }
 
             DisplayGameHistory();
-            Console.Write("Play again? (y/n): ");
-            if (Console.ReadLine()?.Trim().ToLower() == "y")
-            {
-                board = new Board();
-                currentPlayerIndex = 0;
-                Start();
-            }
         }
 
         private void DisplayTitleScreen()
@@ -1214,8 +1232,8 @@ namespace TicTacToe
             Console.WriteLine("       TIC-TAC-TOE GAME          ");
             Console.WriteLine("=================================");
             Console.WriteLine("Welcome to Tic-Tac-Toe!");
-            Console.WriteLine("Enter moves as row (1-3) and column (1-3).");
-            Console.WriteLine("Press any desire to start...");
+            Console.WriteLine("Enter moves as row (1-3) and column (1-3).\n");
+            Console.WriteLine("Press any key to start...");
             Console.ReadKey();
         }
 
@@ -1233,9 +1251,9 @@ namespace TicTacToe
             if (gameHistory.Count == 0)
                 Console.WriteLine("No games played yet.");
             else
-                for (int i = 0; i < gameHistory.Count; i++)
-                    Console.WriteLine($"Game {i + 1}: {gameHistory[i]}");
-            Console.WriteLine("-------------------");
+                foreach (var entry in gameHistory)
+                    Console.WriteLine(entry);
+            Console.WriteLine("-------------------\n");
         }
 
         private void HandleHumanMove(Player player)
@@ -1244,52 +1262,34 @@ namespace TicTacToe
             while (!validMove)
             {
                 Console.Write("Enter row (1-3): ");
-                string rowInput = Console.ReadLine()?.Trim();
-                if (!int.TryParse(rowInput, out int row) || row < 1 || row > 3)
-                {
-                    Console.WriteLine("Invalid row. Please enter a number between 1 and 3.");
-                    continue;
-                }
-
+                string? rowInput = Console.ReadLine()?.Trim();
                 Console.Write("Enter column (1-3): ");
-                string colInput = Console.ReadLine()?.Trim();
-                if (!int.TryParse(colInput, out int col) || col < 1 || col > 3)
-                {
-                    Console.WriteLine("Invalid column. Please enter a number between 1 and 3.");
-                    continue;
-                }
+                string? colInput = Console.ReadLine()?.Trim();
 
-                validMove = board.MakeMove(row - 1, col - 1, player.Symbol);
-                if (!validMove)
-                    Console.WriteLine("Cell already taken or invalid. Try again.");
+                if (int.TryParse(rowInput, out int row) && int.TryParse(colInput, out int col))
+                {
+                    validMove = board.MakeMove(row - 1, col - 1, player.Symbol);
+                    if (!validMove)
+                        Console.WriteLine("Cell already taken or invalid. Try again.");
+                }
+                else
+                {
+                    Console.WriteLine("Invalid input. Enter numbers between 1 and 3.");
+                }
             }
         }
 
         private void HandleAIMove(Player player)
         {
             Console.WriteLine("AI is thinking...");
-            Thread.Sleep(1000); // Simulate AI decision-making
-
-            // AI strategy: Win, block, or random
+            Thread.Sleep(500);
             (int row, int col) = FindBestMove(player.Symbol);
-            if (row == -1 || col == -1)
-            {
-                // Fallback to random move
-                Random rand = new Random();
-                do
-                {
-                    row = rand.Next(0, Board.Size);
-                    col = rand.Next(0, Board.Size);
-                } while (!board.IsCellEmpty(row, col));
-            }
-
             board.MakeMove(row, col, player.Symbol);
             Console.WriteLine($"AI placed {player.Symbol} at row {row + 1}, column {col + 1}");
         }
 
         private (int, int) FindBestMove(PlayerSymbol symbol)
         {
-            // Look for a winning move
             for (int i = 0; i < Board.Size; i++)
                 for (int j = 0; j < Board.Size; j++)
                     if (board.IsCellEmpty(i, j))
@@ -1303,7 +1303,6 @@ namespace TicTacToe
                         board.MakeMove(i, j, PlayerSymbol.None);
                     }
 
-            // Look for a blocking move
             PlayerSymbol opponent = symbol == PlayerSymbol.X ? PlayerSymbol.O : PlayerSymbol.X;
             for (int i = 0; i < Board.Size; i++)
                 for (int j = 0; j < Board.Size; j++)
@@ -1318,20 +1317,24 @@ namespace TicTacToe
                         board.MakeMove(i, j, PlayerSymbol.None);
                     }
 
-            // Prefer center
             if (board.IsCellEmpty(1, 1))
                 return (1, 1);
 
-            // Prefer corners
-            int[] corners = [0, 2];
+            int[] corners = new int[] { 0, 2 };
             foreach (int i in corners)
                 foreach (int j in corners)
                     if (board.IsCellEmpty(i, j))
                         return (i, j);
 
-            return (-1, -1); // No strategic move
+            for (int i = 0; i < Board.Size; i++)
+                for (int j = 0; j < Board.Size; j++)
+                    if (board.IsCellEmpty(i, j))
+                        return (i, j);
+
+            return (-1, -1);
         }
     }
+}
 
    // Display the history of played games
 private void DisplayGameHistory()

@@ -1149,31 +1149,119 @@ public class GameAnalytics
     }
 }
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+/// <summary>
+/// Represents player symbols in the game.
+/// </summary>
+public enum PlayerSymbol
+{
+    X,
+    O
+}
+
+/// <summary>
+/// Represents the result of a game
+/// </summary>
+public enum GameResult
+{
+    Win,
+    Loss,
+    Draw,
+    Unknown
+}
+
+/// <summary>
+/// Holds information about a single game
+/// </summary>
 public class GameRecord
 {
     public Guid GameId { get; }
     public List<MoveRecord> Moves { get; }
     public PlayerSymbol? Winner { get; set; }
     public DateTime GameDate { get; }
+    public TimeSpan GameDuration { get; set; }
+    public string Description { get; set; }
+    public string GameMode { get; set; }
 
     public GameRecord()
     {
         GameId = Guid.NewGuid();
         Moves = new List<MoveRecord>();
         GameDate = DateTime.Now;
+        GameDuration = TimeSpan.Zero;
+        Description = string.Empty;
+        GameMode = "Classic";
+    }
+
+    public void AddMove(MoveRecord move)
+    {
+        Moves.Add(move);
+        UpdateGameDuration();
+    }
+
+    private void UpdateGameDuration()
+    {
+        if (Moves.Count < 2) return;
+        GameDuration = Moves.Last().Timestamp - Moves.First().Timestamp;
+    }
+
+    public string GetSummary()
+    {
+        return $"Game ID: {GameId}\nDate: {GameDate}\nWinner: {Winner?.ToString() ?? "None"}\nMoves: {Moves.Count}\nDuration: {GameDuration.TotalSeconds:F2} sec\n";
+    }
+
+    public int GetMoveCountByPlayer(PlayerSymbol player) => Moves.Count(m => m.Player == player);
+
+    public IEnumerable<MoveRecord> GetMovesByTurnOrder()
+    {
+        return Moves.OrderBy(m => m.MoveNumber);
+    }
+
+    public bool WasDraw() => Winner == null && Moves.Count >= 9;
+
+    public bool IsValidGame()
+    {
+        return Moves.Count >= 5 && (Winner != null || WasDraw());
     }
 }
 
+/// <summary>
+/// Represents a single move made during a game
+/// </summary>
 public class MoveRecord
 {
     public PlayerSymbol Player { get; set; }
     public int Row { get; set; }
     public int Column { get; set; }
     public int MoveNumber { get; set; }
+    public DateTime Timestamp { get; set; }
+    public string MoveEvaluation { get; set; }
+
+    public MoveRecord()
+    {
+        Timestamp = DateTime.Now;
+        MoveEvaluation = "Neutral";
+    }
+
+    public bool IsCenterMove() => Row == 1 && Column == 1;
+
+    public bool IsCornerMove() => (Row == 0 || Row == 2) && (Column == 0 || Column == 2);
+
+    public string FormatMove()
+    {
+        return $"#{MoveNumber}: Player {Player} moved to ({Row}, {Column}) at {Timestamp:T}";
+    }
 }
 
+/// <summary>
+/// Tracks statistical data about a player's performance
+/// </summary>
 public class PlayerStats
 {
+    public string PlayerName { get; set; }
     public int TotalGames { get; set; }
     public int Wins { get; set; }
     public int Losses { get; set; }
@@ -1181,8 +1269,149 @@ public class PlayerStats
     public int TotalMoves { get; set; }
     public int CenterMoves { get; set; }
     public int CornerMoves { get; set; }
+
     public decimal AverageMovesPerGame => TotalGames == 0 ? 0 : (decimal)TotalMoves / TotalGames;
+
+    public double WinRate => TotalGames == 0 ? 0 : (double)Wins / TotalGames;
+
+    public void RecordGame(GameResult result, List<MoveRecord> moves)
+    {
+        TotalGames++;
+        switch (result)
+        {
+            case GameResult.Win: Wins++; break;
+            case GameResult.Loss: Losses++; break;
+            case GameResult.Draw: Draws++; break;
+        }
+
+        TotalMoves += moves.Count;
+        CenterMoves += moves.Count(m => m.IsCenterMove());
+        CornerMoves += moves.Count(m => m.IsCornerMove());
+    }
+
+    public void PrintSummary()
+    {
+        Console.WriteLine($"Player: {PlayerName}");
+        Console.WriteLine($"Games: {TotalGames}, Wins: {Wins}, Losses: {Losses}, Draws: {Draws}");
+        Console.WriteLine($"Avg. Moves/Game: {AverageMovesPerGame:F2}, Win Rate: {WinRate:P}");
+        Console.WriteLine($"Center Moves: {CenterMoves}, Corner Moves: {CornerMoves}");
+    }
 }
+
+/// <summary>
+/// Tracks the game board state and validates moves
+/// </summary>
+public class GameBoardState
+{
+    private readonly PlayerSymbol?[,] _board;
+
+    public GameBoardState()
+    {
+        _board = new PlayerSymbol?[3, 3];
+    }
+
+    public bool ApplyMove(MoveRecord move)
+    {
+        if (_board[move.Row, move.Column] != null)
+            return false;
+
+        _board[move.Row, move.Column] = move.Player;
+        return true;
+    }
+
+    public PlayerSymbol? CheckWinner()
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            // Rows and columns
+            if (_board[i, 0] != null && _board[i, 0] == _board[i, 1] && _board[i, 1] == _board[i, 2])
+                return _board[i, 0];
+
+            if (_board[0, i] != null && _board[0, i] == _board[1, i] && _board[1, i] == _board[2, i])
+                return _board[0, i];
+        }
+
+        // Diagonals
+        if (_board[0, 0] != null && _board[0, 0] == _board[1, 1] && _board[1, 1] == _board[2, 2])
+            return _board[0, 0];
+
+        if (_board[0, 2] != null && _board[0, 2] == _board[1, 1] && _board[1, 1] == _board[2, 0])
+            return _board[0, 2];
+
+        return null;
+    }
+
+    public void PrintBoard()
+    {
+        for (int r = 0; r < 3; r++)
+        {
+            for (int c = 0; c < 3; c++)
+            {
+                var symbol = _board[r, c]?.ToString() ?? ".";
+                Console.Write($"{symbol} ");
+            }
+            Console.WriteLine();
+        }
+    }
+}
+
+/// <summary>
+/// Logs game events such as start, moves, and results
+/// </summary>
+public class GameEventLog
+{
+    private readonly List<string> _logs = new();
+
+    public void Log(string message)
+    {
+        _logs.Add($"{DateTime.Now:T} - {message}");
+    }
+
+    public void Print()
+    {
+        Console.WriteLine("=== Game Log ===");
+        foreach (var entry in _logs)
+        {
+            Console.WriteLine(entry);
+        }
+    }
+
+    public void Clear() => _logs.Clear();
+}
+
+/// <summary>
+/// Aggregates and analyzes multiple game records
+/// </summary>
+public class GameAnalytics
+{
+    public List<GameRecord> Games { get; set; } = new();
+
+    public void AddGame(GameRecord game)
+    {
+        if (game.IsValidGame())
+            Games.Add(game);
+    }
+
+    public int TotalGames => Games.Count;
+
+    public double AverageMoves => Games.Count == 0 ? 0 : Games.Average(g => g.Moves.Count);
+
+    public double AverageDurationSeconds => Games.Count == 0 ? 0 : Games.Average(g => g.GameDuration.TotalSeconds);
+
+    public void PrintStats()
+    {
+        Console.WriteLine($"Total Games: {TotalGames}");
+        Console.WriteLine($"Avg. Moves: {AverageMoves:F2}");
+        Console.WriteLine($"Avg. Duration: {AverageDurationSeconds:F1} sec");
+
+        var mostMoves = Games.OrderByDescending(g => g.Moves.Count).FirstOrDefault();
+        if (mostMoves != null)
+        {
+            Console.WriteLine($"Game with most moves: {mostMoves.GameId} ({mostMoves.Moves.Count} moves)");
+        }
+    }
+}
+
 
 }
 public override string ToString()

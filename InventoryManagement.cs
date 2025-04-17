@@ -1711,19 +1711,120 @@ public class GameAnalytics
         }
     }
 }
-
 public class GameRecord
 {
     public Guid GameId { get; }
     public List<MoveRecord> Moves { get; }
     public PlayerSymbol? Winner { get; set; }
     public DateTime GameDate { get; }
+    public TimeSpan Duration { get; set; }
+    public string Player1Name { get; set; }
+    public string Player2Name { get; set; }
+    public string GameMode { get; set; }
+    public string DifficultyLevel { get; set; }
+    public string Notes { get; set; }
+    public string ResultSummary => GenerateResultSummary();
+    public List<string> Tags { get; set; }
+    public string Referee { get; set; }
+    public string Location { get; set; }
+    public List<string> Spectators { get; set; }
+    public string TournamentName { get; set; }
+    public int RoundNumber { get; set; }
 
     public GameRecord()
     {
         GameId = Guid.NewGuid();
         Moves = new List<MoveRecord>();
         GameDate = DateTime.Now;
+        Notes = string.Empty;
+        Tags = new List<string>();
+        Spectators = new List<string>();
+    }
+
+    public void AddMove(MoveRecord move)
+    {
+        Moves.Add(move);
+    }
+
+    public void PrintGameSummary()
+    {
+        Console.WriteLine("=== Game Summary ===");
+        Console.WriteLine($"Game ID: {GameId}");
+        Console.WriteLine($"Date: {GameDate}");
+        Console.WriteLine($"Duration: {Duration.TotalSeconds} seconds");
+        Console.WriteLine($"Player 1: {Player1Name}");
+        Console.WriteLine($"Player 2: {Player2Name}");
+        Console.WriteLine($"Game Mode: {GameMode}");
+        Console.WriteLine($"Difficulty Level: {DifficultyLevel}");
+        Console.WriteLine($"Location: {Location}");
+        Console.WriteLine($"Referee: {Referee}");
+        Console.WriteLine($"Winner: {Winner}");
+        Console.WriteLine($"Tournament: {TournamentName}, Round: {RoundNumber}");
+        Console.WriteLine("Tags: " + string.Join(", ", Tags));
+        Console.WriteLine("Spectators: " + string.Join(", ", Spectators));
+        Console.WriteLine("Moves:");
+        foreach (var move in Moves)
+        {
+            Console.WriteLine(move.ToString());
+        }
+        Console.WriteLine($"Notes: {Notes}");
+    }
+
+    private string GenerateResultSummary()
+    {
+        if (Winner == null) return "Draw";
+        return $"Winner: {Winner}";
+    }
+
+    public int TotalMoves => Moves.Count;
+    public IEnumerable<MoveRecord> GetMovesByPlayer(PlayerSymbol player) => Moves.Where(m => m.Player == player);
+    public IEnumerable<MoveRecord> GetCenterMoves() => Moves.Where(m => m.Row == 1 && m.Column == 1);
+    public IEnumerable<MoveRecord> GetCornerMoves() => Moves.Where(m => (m.Row == 0 || m.Row == 2) && (m.Column == 0 || m.Column == 2));
+    public IEnumerable<MoveRecord> GetEdgeMoves() => Moves.Where(m => m.Row != 1 && m.Column != 1 && (m.Row == 0 || m.Row == 2 || m.Column == 0 || m.Column == 2));
+    public Dictionary<int, (int Row, int Col)> GetMoveOrder() => Moves.OrderBy(m => m.MoveNumber).ToDictionary(m => m.MoveNumber, m => (m.Row, m.Column));
+    public bool IsGameOver => Winner != null || Moves.Count == 9;
+
+    public void AddNote(string note)
+    {
+        Notes += $"- {note}\n";
+    }
+
+    public void PrintNotes()
+    {
+        Console.WriteLine("Game Notes:");
+        Console.WriteLine(string.IsNullOrWhiteSpace(Notes) ? "No notes." : Notes);
+    }
+
+    public void TagGame(string tag)
+    {
+        if (!Tags.Contains(tag))
+            Tags.Add(tag);
+    }
+
+    public void RemoveTag(string tag)
+    {
+        Tags.Remove(tag);
+    }
+
+    public void ClearTags()
+    {
+        Tags.Clear();
+    }
+
+    public void AddSpectator(string name)
+    {
+        if (!Spectators.Contains(name))
+            Spectators.Add(name);
+    }
+
+    public void RemoveSpectator(string name)
+    {
+        Spectators.Remove(name);
+    }
+
+    public void ClearSpectators()
+    {
+        Spectators.Clear();
     }
 }
 
@@ -1733,6 +1834,24 @@ public class MoveRecord
     public int Row { get; set; }
     public int Column { get; set; }
     public int MoveNumber { get; set; }
+    public DateTime Timestamp { get; set; }
+    public string Description => $"{Player} to ({Row + 1}, {Column + 1})";
+    public TimeSpan TimeSinceStart { get; set; }
+    public string StrategyHint { get; set; }
+    public bool IsDecisiveMove { get; set; }
+
+    public MoveRecord()
+    {
+        Timestamp = DateTime.Now;
+        StrategyHint = string.Empty;
+    }
+
+    public override string ToString()
+    {
+        string hint = string.IsNullOrWhiteSpace(StrategyHint) ? "" : $" [Hint: {StrategyHint}]";
+        string decisive = IsDecisiveMove ? " (Decisive Move)" : string.Empty;
+        return $"Move {MoveNumber}: {Player} played at ({Row}, {Column}) at {Timestamp}{hint}{decisive}";
+    }
 }
 
 public class PlayerStats
@@ -1744,10 +1863,86 @@ public class PlayerStats
     public int TotalMoves { get; set; }
     public int CenterMoves { get; set; }
     public int CornerMoves { get; set; }
+    public int TotalEdgeMoves { get; set; }
     public decimal AverageMovesPerGame => TotalGames == 0 ? 0 : (decimal)TotalMoves / TotalGames;
+    public decimal WinRate => TotalGames == 0 ? 0 : (decimal)Wins / TotalGames * 100;
+    public decimal DrawRate => TotalGames == 0 ? 0 : (decimal)Draws / TotalGames * 100;
+    public TimeSpan TotalPlayTime { get; set; } = TimeSpan.Zero;
+    public TimeSpan AveragePlayTime => TotalGames == 0 ? TimeSpan.Zero : TimeSpan.FromSeconds(TotalPlayTime.TotalSeconds / TotalGames);
+    public int Streak { get; set; }
+    public string LastResult { get; set; }
+
+    public void UpdateStats(GameRecord record, PlayerSymbol player)
+    {
+        TotalGames++;
+        var movesByPlayer = record.GetMovesByPlayer(player);
+        TotalMoves += movesByPlayer.Count();
+        CenterMoves += movesByPlayer.Count(m => m.Row == 1 && m.Column == 1);
+        CornerMoves += movesByPlayer.Count(m => (m.Row == 0 || m.Row == 2) && (m.Column == 0 || m.Column == 2));
+        TotalEdgeMoves += movesByPlayer.Count(m => m.Row != 1 && m.Column != 1 && (m.Row == 0 || m.Row == 2 || m.Column == 0 || m.Column == 2));
+
+        if (record.Winner == null)
+        {
+            Draws++;
+            LastResult = "Draw";
+            Streak = 0;
+        }
+        else if (record.Winner == player)
+        {
+            Wins++;
+            LastResult = "Win";
+            Streak++;
+        }
+        else
+        {
+            Losses++;
+            LastResult = "Loss";
+            Streak = 0;
+        }
+
+        TotalPlayTime += record.Duration;
+    }
+
+    public void PrintStats(string playerName)
+    {
+        Console.WriteLine($"Stats for {playerName}:");
+        Console.WriteLine($"Total Games: {TotalGames}");
+        Console.WriteLine($"Wins: {Wins} ({WinRate:F2}%)");
+        Console.WriteLine($"Losses: {Losses}");
+        Console.WriteLine($"Draws: {Draws} ({DrawRate:F2}%)");
+        Console.WriteLine($"Total Moves: {TotalMoves}");
+        Console.WriteLine($"Center Moves: {CenterMoves}");
+        Console.WriteLine($"Corner Moves: {CornerMoves}");
+        Console.WriteLine($"Edge Moves: {TotalEdgeMoves}");
+        Console.WriteLine($"Average Moves/Game: {AverageMovesPerGame:F2}");
+        Console.WriteLine($"Average Play Time: {AveragePlayTime.TotalSeconds:F2} seconds");
+        Console.WriteLine($"Current Streak: {Streak}");
+        Console.WriteLine($"Last Result: {LastResult}\n");
+    }
+
+    public void Reset()
+    {
+        TotalGames = 0;
+        Wins = 0;
+        Losses = 0;
+        Draws = 0;
+        TotalMoves = 0;
+        CenterMoves = 0;
+        CornerMoves = 0;
+        TotalEdgeMoves = 0;
+        TotalPlayTime = TimeSpan.Zero;
+        Streak = 0;
+        LastResult = string.Empty;
+    }
 }
 
+public enum PlayerSymbol
+{
+    None,
+    X,
+    O
 }
+
     // Main program
     class Program
     {

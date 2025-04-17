@@ -2,40 +2,271 @@ using System;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
-// Interfaces
+/// <summary>
+/// Represents a product in the store.
+/// </summary>
 public interface IProduct {
     string Id { get; }
     string Name { get; }
     decimal Price { get; }
     string Category { get; }
+    string Description { get; }
+    decimal Weight { get; }
 }
 
+/// <summary>
+/// Represents a customer's order.
+/// </summary>
 public interface IOrder {
     string Id { get; }
     List<(string ProductId, int Quantity)> Products { get; }
     string Status { get; set; }
     DateTime CreatedAt { get; }
+    decimal TotalPrice { get; }
+    string CustomerId { get; }
 }
 
+/// <summary>
+/// Represents a product discount.
+/// </summary>
+public interface IDiscount {
+    string Id { get; }
+    string ProductId { get; }
+    decimal Percentage { get; }
+    bool IsActive { get; }
+}
+
+/// <summary>
+/// Represents shipping information.
+/// </summary>
+public interface IShippingInfo {
+    string Address { get; set; }
+    string City { get; set; }
+    string Country { get; set; }
+    string PostalCode { get; set; }
+}
+
+/// <summary>
+/// The base product class.
+/// </summary>
 public class Product : IProduct {
     public string Id { get; set; }
     public string Name { get; set; }
     public decimal Price { get; set; }
     public string Category { get; set; }
+    public string Description { get; set; }
+    public decimal Weight { get; set; }
+
+    public override string ToString() =>
+        $"{Name} ({Category}): {Price:C2}";
 }
 
+/// <summary>
+/// Represents an order containing multiple products.
+/// </summary>
 public class Order : IOrder {
     public string Id { get; set; }
     public List<(string ProductId, int Quantity)> Products { get; set; } = new();
-    public string Status { get; set; } = "pending";
+    public string Status { get; set; } = "Pending";
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string CustomerId { get; set; }
+
+    public decimal TotalPrice { get; private set; }
+
+    public void CalculateTotal(IEnumerable<Product> allProducts) {
+        TotalPrice = Products.Sum(p => {
+            var prod = allProducts.FirstOrDefault(x => x.Id == p.ProductId);
+            return prod != null ? prod.Price * p.Quantity : 0;
+        });
+    }
+
+    public void AddProduct(string productId, int quantity) {
+        Products.Add((productId, quantity));
+    }
+
+    public void RemoveProduct(string productId) {
+        Products.RemoveAll(p => p.ProductId == productId);
+    }
 }
 
+/// <summary>
+/// Represents an inventory item.
+/// </summary>
 public class InventoryItem {
     public Product Product { get; set; }
     public int Quantity { get; set; }
+
+    public bool IsInStock => Quantity > 0;
+
+    public void ReduceStock(int amount) {
+        if (Quantity >= amount) {
+            Quantity -= amount;
+        } else {
+            throw new InvalidOperationException("Insufficient stock.");
+        }
+    }
+
+    public void Restock(int amount) {
+        Quantity += amount;
+    }
 }
+
+/// <summary>
+/// A concrete discount model.
+/// </summary>
+public class Discount : IDiscount {
+    public string Id { get; set; }
+    public string ProductId { get; set; }
+    public decimal Percentage { get; set; }
+    public bool IsActive { get; set; }
+}
+
+/// <summary>
+/// Customer shipping info.
+/// </summary>
+public class ShippingInfo : IShippingInfo {
+    public string Address { get; set; }
+    public string City { get; set; }
+    public string Country { get; set; }
+    public string PostalCode { get; set; }
+
+    public override string ToString() =>
+        $"{Address}, {City}, {Country}, {PostalCode}";
+}
+
+/// <summary>
+/// Represents a customer.
+/// </summary>
+public class Customer {
+    public string Id { get; set; }
+    public string FullName { get; set; }
+    public IShippingInfo ShippingInfo { get; set; }
+    public List<Order> Orders { get; set; } = new();
+
+    public void PlaceOrder(Order order) {
+        Orders.Add(order);
+    }
+}
+
+/// <summary>
+/// Order statuses.
+/// </summary>
+public enum OrderStatus {
+    Pending,
+    Confirmed,
+    Shipped,
+    Delivered,
+    Cancelled
+}
+
+/// <summary>
+/// Inventory manager service.
+/// </summary>
+public class InventoryService {
+    private readonly Dictionary<string, InventoryItem> _items = new();
+
+    public void AddInventoryItem(InventoryItem item) {
+        _items[item.Product.Id] = item;
+    }
+
+    public InventoryItem GetItem(string productId) {
+        return _items.TryGetValue(productId, out var item) ? item : null;
+    }
+
+    public bool HasStock(string productId, int quantity) {
+        var item = GetItem(productId);
+        return item != null && item.Quantity >= quantity;
+    }
+
+    public void DeductStock(string productId, int quantity) {
+        var item = GetItem(productId);
+        if (item == null || item.Quantity < quantity)
+            throw new InvalidOperationException("Not enough stock.");
+        item.ReduceStock(quantity);
+    }
+
+    public List<InventoryItem> GetAllInventory() => _items.Values.ToList();
+}
+
+/// <summary>
+/// Handles order processing.
+/// </summary>
+public class OrderService {
+    private readonly InventoryService _inventoryService;
+
+    public OrderService(InventoryService inventoryService) {
+        _inventoryService = inventoryService;
+    }
+
+    public void ProcessOrder(Order order, List<Product> productCatalog) {
+        foreach (var (productId, qty) in order.Products) {
+            _inventoryService.DeductStock(productId, qty);
+        }
+
+        order.CalculateTotal(productCatalog);
+        order.Status = OrderStatus.Confirmed.ToString();
+    }
+}
+
+/// <summary>
+/// Factory for creating products.
+/// </summary>
+public static class ProductFactory {
+    public static Product Create(string name, decimal price, string category, string description, decimal weight) {
+        return new Product {
+            Id = Guid.NewGuid().ToString(),
+            Name = name,
+            Price = price,
+            Category = category,
+            Description = description,
+            Weight = weight
+        };
+    }
+}
+
+/// <summary>
+/// Validator utility.
+/// </summary>
+public static class Validator {
+    public static bool ValidateProduct(Product p) =>
+        !string.IsNullOrEmpty(p.Name) &&
+        p.Price > 0 &&
+        !string.IsNullOrEmpty(p.Category);
+}
+
+/// <summary>
+/// Demo program usage.
+/// </summary>
+public static class Program {
+    public static void Main() {
+        var catalog = new List<Product> {
+            ProductFactory.Create("Phone", 999.99m, "Electronics", "Smartphone with OLED display", 0.5m),
+            ProductFactory.Create("Laptop", 1599.99m, "Computers", "Powerful laptop for work", 2.5m),
+        };
+
+        var inventory = new InventoryService();
+        foreach (var product in catalog) {
+            inventory.AddInventoryItem(new InventoryItem { Product = product, Quantity = 10 });
+        }
+
+        var order = new Order {
+            Id = Guid.NewGuid().ToString(),
+            CustomerId = "cust-001"
+        };
+        order.AddProduct(catalog[0].Id, 1);
+        order.AddProduct(catalog[1].Id, 1);
+
+        var orderService = new OrderService(inventory);
+        orderService.ProcessOrder(order, catalog);
+
+        Console.WriteLine($"Order processed. Total: {order.TotalPrice:C2} | Status: {order.Status}");
+    }
+}
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
